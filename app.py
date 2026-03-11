@@ -56,7 +56,11 @@ st.markdown("""
 
 # --- Authentication ---
 def check_password():
-    APP_PASSWORD = "admin" # Set your password here
+    # Get password from Streamlit Secrets or Environment Variables
+    try:
+        APP_PASSWORD = st.secrets["APP_PASSWORD"]
+    except Exception:
+        APP_PASSWORD = os.environ.get("APP_PASSWORD", "admin")
 
     def password_entered():
         if st.session_state["password"] == APP_PASSWORD:
