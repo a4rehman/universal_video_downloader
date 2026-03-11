@@ -132,36 +132,50 @@ def download_video(url, format_type, download_path):
 
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            ydl.download([url])
-        return True, "Download Successful!"
+            info = ydl.extract_info(url, download=True)
+            # Find the actual filename
+            if 'entries' in info: # It's a playlist
+                filename = ydl.prepare_filename(info['entries'][0])
+            else:
+                filename = ydl.prepare_filename(info)
+            
+            # Ensure extension is correct (sometimes prepare_filename is slightly off for merged files)
+            if not os.path.exists(filename):
+                # Look for files with the same base name
+                base = os.path.splitext(filename)[0]
+                for f in os.listdir(download_path):
+                    if f.startswith(os.path.basename(base)):
+                        filename = os.path.join(download_path, f)
+                        break
+
+            return True, filename
     except Exception as e:
         error_msg = str(e)
         if "ffmpeg" in error_msg.lower():
-            # Fallback to 'best' format if ffmpeg is missing
             st.warning("⚠️ FFmpeg not found. Downloading best compatible version (usually 720p)...")
-            ydl_opts['format'] = 'best' # This doesn't require merging
+            ydl_opts['format'] = 'best'
             if 'postprocessors' in ydl_opts: ydl_opts.pop('postprocessors', None)
             try:
                 with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                    ydl.download([url])
-                return True, "Download Successful (720p Fallback)!"
+                    info = ydl.extract_info(url, download=True)
+                    filename = ydl.prepare_filename(info)
+                    return True, filename
             except Exception as e2:
                 return False, f"FFmpeg is missing and fallback failed: {str(e2)}"
         return False, error_msg
 
-def download_image(url, download_path):
     try:
-        response = requests.get(url, stream=True)
+        response = requests.get(url, stream=True, timeout=30)
         if response.status_code == 200:
             content_type = response.headers.get('content-type', '')
             if 'image' in content_type:
-                ext = content_type.split('/')[-1]
+                ext = content_type.split('/')[-1].split(';')[0]
                 filename = f"image_{int(time.time())}.{ext}"
                 full_path = os.path.join(download_path, filename)
                 
                 with open(full_path, 'wb') as f:
                     f.write(response.content)
-                return True, f"Image saved: {filename}"
+                return True, full_path
             else:
                 return False, "URL does not point to a valid image."
         else:
@@ -205,21 +219,39 @@ with col2:
                     os.makedirs(download_folder)
                 
                 if media_type in ["Video", "Audio"]:
-                    with st.spinner("Analyzing URL..."):
-                        success, message = download_video(target_url, media_type, download_folder)
+                    with st.spinner("Processing Media... This may take a moment."):
+                        success, result = download_video(target_url, media_type, download_folder)
                         if success:
-                            st.success(message)
+                            st.success("✅ Download complete on server!")
+                            with open(result, "rb") as file:
+                                st.download_button(
+                                    label="💾 SAVE TO COMPUTER",
+                                    data=file,
+                                    file_name=os.path.basename(result),
+                                    mime="application/octet-stream",
+                                    use_container_width=True
+                                )
                             st.balloons()
                         else:
-                            st.error(f"Failed: {message}")
+                            st.error(f"❌ Failed: {result}")
+                            if "not available" in result.lower():
+                                st.info("💡 Tip: This video might be restricted, private, or blocked in the server's region.")
                 else:
                     with st.spinner("Fetching Image..."):
-                        success, message = download_image(target_url, download_folder)
+                        success, result = download_image(target_url, download_folder)
                         if success:
-                            st.success(message)
+                            st.success("✅ Image ready!")
+                            with open(result, "rb") as file:
+                                st.download_button(
+                                    label="💾 SAVE IMAGE TO COMPUTER",
+                                    data=file,
+                                    file_name=os.path.basename(result),
+                                    mime="image/jpeg",
+                                    use_container_width=True
+                                )
                             st.balloons()
                         else:
-                            st.error(f"Failed: {message}")
+                            st.error(f"❌ Failed: {result}")
         
         st.markdown('</div>', unsafe_allow_html=True)
 

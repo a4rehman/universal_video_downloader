@@ -107,13 +107,13 @@ class DownloaderApp(ctk.CTk):
                     'outtmpl': os.path.join(self.download_path, '%(title)s.%(ext)s'),
                     'progress_hooks': [self.progress_hook],
                     'socket_timeout': 30,
-                    'retries': 15,
-                    'fragment_retries': 15,
-                    'ignoreerrors': True,
+                    'retries': 20,
+                    'fragment_retries': 20,
+                    'ignoreerrors': 'only_download', # Skip failed videos but continue
                     'noplaylist': False,
-                    # SPEED OPTIMIZATION: Multi-threaded downloads
                     'concurrent_fragment_downloads': 10, 
                     'n_threads': 10,
+                    'js_runtimes': ['node', 'deno'],
                 }
 
                 if m_type == "Audio":
@@ -125,16 +125,11 @@ class DownloaderApp(ctk.CTk):
                             'preferredquality': '192',
                         }]
                     else:
-                        # Fallback for audio: download whatever is best and hope it plays
                         ydl_opts['format'] = 'bestaudio/best'
                 else: # Video
                     if ffmpeg_exists:
-                        # ffmpeg exists, we can merge best video and best audio
                         ydl_opts['format'] = 'bestvideo+bestaudio/best'
                     else:
-                        # ffmpeg MISSING, we MUST force a single pre-merged file
-                        # format 22 is usually 720p MP4, 18 is 360p MP4. Both are pre-merged.
-                        # 'best[ext=mp4]/best' picks the best SINGLE file.
                         ydl_opts['format'] = 'best[ext=mp4]/best'
 
                 with yt_dlp.YoutubeDL(ydl_opts) as ydl:
