@@ -54,6 +54,35 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
+# --- Authentication ---
+def check_password():
+    APP_PASSWORD = "admin" # Set your password here
+
+    def password_entered():
+        if st.session_state["password"] == APP_PASSWORD:
+            st.session_state["password_correct"] = True
+            del st.session_state["password"]
+        else:
+            st.session_state["password_correct"] = False
+
+    if st.session_state.get("password_correct", False):
+        return True
+
+    # Show input if not correct or not entered yet
+    st.markdown('<div class="title-text" style="font-size: 2.5rem; margin-top: 5rem;">🔒 Access Restricted</div>', unsafe_allow_html=True)
+    st.markdown('<div class="subtitle-text">Please enter the password to use OmniStream</div>', unsafe_allow_html=True)
+    
+    col1, col2, col3 = st.columns([1, 2, 1])
+    with col2:
+        st.text_input("Password", type="password", on_change=password_entered, key="password", label_visibility="collapsed", placeholder="Enter Password")
+        if "password_correct" in st.session_state and not st.session_state["password_correct"]:
+            st.error("😕 Incorrect password")
+            
+    return False
+
+if not check_password():
+    st.stop()
+
 # --- Logic Functions ---
 
 def download_video(url, format_type, download_path):
