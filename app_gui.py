@@ -103,14 +103,29 @@ class DownloaderApp(ctk.CTk):
 
         try:
             if m_type in ["Video", "Audio"]:
+                class MyLogger:
+                    def __init__(self, app):
+                        self.app = app
+                    def debug(self, msg):
+                        if "Extracting URL" in msg or "Downloading webpage" in msg:
+                            self.app.after(0, lambda: self.app.status_label.configure(text=f"🔍 Analyzing: {msg[:50]}..."))
+                    def info(self, msg):
+                        self.app.after(0, lambda: self.app.status_label.configure(text=msg[:60]))
+                    def warning(self, msg):
+                        pass
+                    def error(self, msg):
+                        pass
+
                 ydl_opts = {
                     'outtmpl': os.path.join(self.download_path, '%(title)s.%(ext)s'),
                     'progress_hooks': [self.progress_hook],
+                    'logger': MyLogger(self),
                     'socket_timeout': 30,
                     'retries': 20,
                     'fragment_retries': 20,
-                    'ignoreerrors': 'only_download', # Skip failed videos but continue
+                    'ignoreerrors': 'only_download',
                     'noplaylist': False,
+                    'lazy_playlist': True, # Start downloading first video immediately
                     'concurrent_fragment_downloads': 10, 
                     'n_threads': 10,
                     'js_runtimes': {'node': {}, 'deno': {}},
