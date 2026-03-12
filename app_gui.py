@@ -113,7 +113,7 @@ class DownloaderApp(ctk.CTk):
                     'noplaylist': False,
                     'concurrent_fragment_downloads': 10, 
                     'n_threads': 10,
-                    'js_runtimes': ['node', 'deno'],
+                    'js_runtimes': {'node': {}, 'deno': {}},
                 }
 
                 if m_type == "Audio":
