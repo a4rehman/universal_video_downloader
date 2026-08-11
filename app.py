@@ -13,12 +13,17 @@ st.set_page_config(
     layout="wide"
 )
 
-# --- Custom CSS for Premium Look ---
+# --- Custom CSS for Premium & Professional Looks ---
 st.markdown("""
 <style>
-    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap');
+    @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700;800&display=swap');
     
-    /* Background shifting gradient animation */
+    /* Global Styles */
+    html, body, [class*="css"], .stApp {
+        font-family: 'Outfit', sans-serif !important;
+    }
+
+    /* Background Shifting Gradient */
     @keyframes gradient-bg {
         0% { background-position: 0% 50%; }
         50% { background-position: 100% 50%; }
@@ -26,12 +31,13 @@ st.markdown("""
     }
     
     .stApp {
-        background: linear-gradient(-45deg, #0f172a, #1e293b, #0f172a, #1e1b4b);
+        background: linear-gradient(-45deg, #090d16, #0f172a, #1e1b4b, #090d16);
         background-size: 400% 400%;
-        animation: gradient-bg 15s ease infinite;
+        animation: gradient-bg 18s ease infinite;
+        color: #f8fafc;
     }
     
-    /* Text shimmer gradient animation */
+    /* Header Styles */
     @keyframes title-shimmer {
         0% { background-position: 0% 50%; }
         50% { background-position: 100% 50%; }
@@ -39,33 +45,31 @@ st.markdown("""
     }
     
     .title-text {
-        font-family: 'Inter', sans-serif;
-        font-size: 3.8rem;
+        font-size: 4rem;
         font-weight: 800;
-        background: linear-gradient(90deg, #60a5fa, #3b82f6, #8b5cf6, #ec4899, #60a5fa);
+        background: linear-gradient(90deg, #38bdf8, #818cf8, #c084fc, #f472b6, #38bdf8);
         background-size: 200% auto;
         -webkit-background-clip: text;
         -webkit-text-fill-color: transparent;
         animation: title-shimmer 6s linear infinite;
-        margin-bottom: 0.5rem;
+        margin-bottom: 0.2rem;
         text-align: center;
         letter-spacing: -0.05em;
     }
     
     .subtitle-text {
-        font-family: 'Inter', sans-serif;
         color: #94a3b8;
-        font-size: 1.25rem;
+        font-size: 1.3rem;
         text-align: center;
-        margin-bottom: 3rem;
-        font-weight: 400;
+        margin-bottom: 2.5rem;
+        font-weight: 300;
     }
 
-    /* Card fade-in-up animation */
+    /* Card Layout (Glassmorphism) */
     @keyframes fadeInUp {
         from {
             opacity: 0;
-            transform: translateY(20px);
+            transform: translateY(30px);
         }
         to {
             opacity: 1;
@@ -74,65 +78,95 @@ st.markdown("""
     }
 
     .download-card {
-        background: rgba(30, 41, 59, 0.45);
-        border: 1px solid rgba(99, 102, 241, 0.2);
-        padding: 35px;
+        background: rgba(15, 23, 42, 0.6);
+        border: 1px solid rgba(129, 140, 248, 0.25);
+        padding: 40px;
         border-radius: 24px;
-        backdrop-filter: blur(16px);
-        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+        backdrop-filter: blur(20px);
+        -webkit-backdrop-filter: blur(20px);
+        box-shadow: 0 20px 50px rgba(0, 0, 0, 0.4);
         animation: fadeInUp 0.8s cubic-bezier(0.16, 1, 0.3, 1) forwards;
-        transition: all 0.3s ease;
+        transition: all 0.4s ease;
     }
     
     .download-card:hover {
-        border-color: rgba(99, 102, 241, 0.4);
-        box-shadow: 0 15px 40px rgba(99, 102, 241, 0.15);
-        transform: translateY(-2px);
+        border-color: rgba(129, 140, 248, 0.45);
+        box-shadow: 0 25px 60px rgba(99, 102, 241, 0.2);
     }
     
+    /* Inputs Styling */
     .stTextInput>div>div>input {
-        background-color: #0f172a;
-        color: white;
-        border: 1px solid #334155;
-        border-radius: 12px;
-        transition: all 0.3s ease;
-        font-family: 'Inter', sans-serif;
+        background-color: rgba(15, 23, 42, 0.85) !important;
+        color: #ffffff !important;
+        border: 1px solid rgba(71, 85, 105, 0.8) !important;
+        border-radius: 14px !important;
+        padding: 12px 16px !important;
+        font-size: 1rem !important;
+        transition: all 0.3s ease !important;
     }
     
     .stTextInput>div>div>input:focus {
-        border-color: #6366f1;
-        box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.2);
+        border-color: #818cf8 !important;
+        box-shadow: 0 0 0 4px rgba(129, 140, 248, 0.25) !important;
     }
 
-    /* Styled buttons with pulsing glows */
+    /* Selectboxes Styling */
+    .stSelectbox>div>div>div {
+        background-color: rgba(15, 23, 42, 0.85) !important;
+        color: #ffffff !important;
+        border: 1px solid rgba(71, 85, 105, 0.8) !important;
+        border-radius: 14px !important;
+    }
+
+    /* Buttons with Pulsing Glow */
     .stButton>button {
-        background: linear-gradient(135deg, #6366f1, #3b82f6);
-        color: white;
-        font-family: 'Inter', sans-serif;
-        font-weight: 700;
-        border: none;
-        border-radius: 12px;
-        padding: 12px 24px;
-        transition: all 0.3s ease;
-        box-shadow: 0 4px 12px rgba(99, 102, 241, 0.3);
+        background: linear-gradient(135deg, #6366f1, #4f46e5) !important;
+        color: white !important;
+        font-weight: 700 !important;
+        font-size: 1.1rem !important;
+        border: none !important;
+        border-radius: 14px !important;
+        padding: 14px 28px !important;
+        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1) !important;
+        box-shadow: 0 4px 15px rgba(99, 102, 241, 0.35) !important;
+        width: 100%;
     }
     
     .stButton>button:hover {
-        background: linear-gradient(135deg, #4f46e5, #2563eb);
-        transform: translateY(-2px);
-        box-shadow: 0 6px 20px rgba(99, 102, 241, 0.5);
-        color: white;
+        background: linear-gradient(135deg, #4f46e5, #3730a3) !important;
+        transform: translateY(-2px) !important;
+        box-shadow: 0 10px 25px rgba(99, 102, 241, 0.65) !important;
     }
     
     .stButton>button:active {
-        transform: translateY(1px);
+        transform: translateY(1px) !important;
+    }
+
+    /* Download button specific styles */
+    .stDownloadButton>button {
+        background: linear-gradient(135deg, #10b981, #059669) !important;
+        box-shadow: 0 4px 15px rgba(16, 185, 129, 0.35) !important;
+    }
+    .stDownloadButton>button:hover {
+        background: linear-gradient(135deg, #059669, #047857) !important;
+        box-shadow: 0 10px 25px rgba(16, 185, 129, 0.65) !important;
+    }
+
+    /* Info boxes styling */
+    .stAlert {
+        border-radius: 16px !important;
+        border: 1px solid rgba(255, 255, 255, 0.1) !important;
+    }
+
+    /* Divider */
+    hr {
+        border-color: rgba(255, 255, 255, 0.1) !important;
     }
 </style>
 """, unsafe_allow_html=True)
 
 # --- Authentication ---
 def check_password():
-    # Get password from Streamlit Secrets or Environment Variables
     try:
         APP_PASSWORD = st.secrets["APP_PASSWORD"]
     except Exception:
@@ -148,9 +182,8 @@ def check_password():
     if st.session_state.get("password_correct", False):
         return True
 
-    # Show input if not correct or not entered yet
     st.markdown('<div class="title-text" style="font-size: 2.5rem; margin-top: 5rem;">🔒 Access Restricted</div>', unsafe_allow_html=True)
-    st.markdown('<div class="subtitle-text">Please enter the password to use OmniStream</div>', unsafe_allow_html=True)
+    st.markdown('<div class="subtitle-text">Please enter the password to access OmniStream</div>', unsafe_allow_html=True)
     
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
@@ -166,20 +199,26 @@ if not check_password():
 # --- Logic Functions ---
 
 def download_video(url, format_type, download_path):
+    if not os.path.exists(download_path):
+        os.makedirs(download_path)
+
+    # Track directory state to robustly capture the correct output file
+    try:
+        files_before = set(os.listdir(download_path))
+    except Exception:
+        files_before = set()
+
     # Base options
     ydl_opts: dict = {
         'outtmpl': os.path.join(download_path, '%(title)s.%(ext)s'),
         'noplaylist': False,
-        'ignoreerrors': True,
+        'ignoreerrors': False,
         'no_warnings': False,
         'js_runtimes': {'node': {}, 'deno': {}},
         'remote_components': ['ejs:github'],
     }
 
-    # Format selection based on availability of ffmpeg
     if format_type == 'Video':
-        # 'best' usually gives a pre-merged 720p file which doesn't need ffmpeg
-        # 'bestvideo+bestaudio' requires ffmpeg to merge
         ydl_opts['format'] = 'bestvideo+bestaudio/best'
         ydl_opts['merge_output_format'] = 'mp4'
     else:
@@ -202,43 +241,63 @@ def download_video(url, format_type, download_path):
             except:
                 pass
         if d['status'] == 'finished':
-            progress_bar.progress(1.0, text="Download Complete! Processing...")
+            progress_bar.progress(1.0, text="Download Complete! Post-processing...")
 
     ydl_opts['progress_hooks'] = [progress_hook]
 
+    filename = None
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=True)
-            # Find the actual filename
-            if 'entries' in info: # It's a playlist
+            if 'entries' in info:
                 filename = ydl.prepare_filename(info['entries'][0])
             else:
                 filename = ydl.prepare_filename(info)
-            
-            # Ensure extension is correct (sometimes prepare_filename is slightly off for merged files)
-            if not os.path.exists(filename):
-                # Look for files with the same base name
-                base = os.path.splitext(filename)[0]
-                for f in os.listdir(download_path):
-                    if f.startswith(os.path.basename(base)):
-                        filename = os.path.join(download_path, f)
-                        break
-
-            return True, filename
     except Exception as e:
         error_msg = str(e)
         if "ffmpeg" in error_msg.lower():
-            st.warning("⚠️ FFmpeg not found. Downloading best compatible version (usually 720p)...")
+            st.warning("⚠️ FFmpeg issue. Falling back to best compatible resolution...")
             ydl_opts['format'] = 'best'
-            if 'postprocessors' in ydl_opts: ydl_opts.pop('postprocessors', None)
+            if 'postprocessors' in ydl_opts: 
+                ydl_opts.pop('postprocessors', None)
             try:
                 with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                     info = ydl.extract_info(url, download=True)
                     filename = ydl.prepare_filename(info)
-                    return True, filename
             except Exception as e2:
-                return False, f"FFmpeg is missing and fallback failed: {str(e2)}"
-        return False, error_msg
+                return False, f"Fallback failed: {str(e2)}"
+        else:
+            return False, error_msg
+
+    # Robust detection of the downloaded file
+    if filename and os.path.exists(filename):
+        return True, filename
+
+    # Look for newly added files in directory
+    try:
+        files_after = set(os.listdir(download_path))
+        new_files = files_after - files_before
+        if new_files:
+            new_files_list = [os.path.join(download_path, f) for f in new_files]
+            newest_file = max(new_files_list, key=os.path.getmtime)
+            if os.path.exists(newest_file):
+                return True, newest_file
+    except Exception:
+        pass
+
+    # Look for files matching the base title
+    if filename:
+        base = os.path.splitext(filename)[0]
+        try:
+            for f in os.listdir(download_path):
+                if f.startswith(os.path.basename(base)):
+                    full_p = os.path.join(download_path, f)
+                    if os.path.exists(full_p):
+                        return True, full_p
+        except Exception:
+            pass
+
+    return False, "File downloaded successfully but could not be located on disk."
 
 def download_image(url, download_path):
     try:
@@ -256,21 +315,25 @@ def download_image(url, download_path):
             else:
                 return False, "URL does not point to a valid image."
         else:
-            return False, f"Error: Status code {response.status_code}"
+            return False, f"HTTP Error Status: {response.status_code}"
     except Exception as e:
         return False, str(e)
 
 # --- Sidebar ---
 with st.sidebar:
-    st.image("https://img.icons8.com/nolan/128/download.png", width=80)
+    st.image("https://img.icons8.com/nolan/128/download.png", width=70)
     st.markdown("### Settings")
-    download_folder = st.text_input("Download Folder", value=os.path.join(os.path.expanduser("~"), "Downloads"))
+    
+    # Safe default path for Streamlit Cloud deployments
+    default_dir = os.path.join(os.getcwd(), "downloads")
+    download_folder = st.text_input("Download Target Directory", value=default_dir)
+    
     st.divider()
-    st.info("Supports: YouTube, Instagram, Facebook, TikTok, Twitter, Pinterest & More.")
+    st.info("💡 Supports: YouTube, Instagram, Facebook, TikTok, Twitter, Pinterest, & more.")
 
 # --- Header ---
 st.markdown('<div class="title-text">OmniStream</div>', unsafe_allow_html=True)
-st.markdown('<div class="subtitle-text">The Universal Video & Image Downloader</div>', unsafe_allow_html=True)
+st.markdown('<div class="subtitle-text">The Premium Universal Video & Image Downloader</div>', unsafe_allow_html=True)
 
 # --- Main UI ---
 col1, col2, col3 = st.columns([1, 6, 1])
@@ -279,13 +342,13 @@ with col2:
     with st.container():
         st.markdown('<div class="download-card">', unsafe_allow_html=True)
         
-        target_url = st.text_input("🔗 Paste URL here (Video, Playlist, or Image):", placeholder="https://www.youtube.com/watch?v=... or https://site.com/image.jpg")
+        target_url = st.text_input("🔗 Paste Media Link (Video, Playlist, or Image):", placeholder="e.g., https://www.youtube.com/watch?v=dQw4w9WgXcQ")
         
         c1, c2 = st.columns(2)
         with c1:
-            media_type = st.selectbox("Media Type", ["Video", "Audio", "Image"])
+            media_type = st.selectbox("Type", ["Video", "Audio", "Image"])
         with c2:
-            quality = st.selectbox("Resolution/Quality", ["Best Available", "1080p", "720p", "480p"])
+            quality = st.selectbox("Preferred Quality", ["Best Available", "1080p", "720p", "480p"])
             
         st.write("")
         if st.button("🚀 Start Download", use_container_width=True):
@@ -298,8 +361,8 @@ with col2:
                 if media_type in ["Video", "Audio"]:
                     with st.spinner("Processing Media... This may take a moment."):
                         success, result = download_video(target_url, media_type, download_folder)
-                        if success:
-                            st.success("✅ Download complete on server!")
+                        if success and os.path.exists(result):
+                            st.success("✅ Processed successfully!")
                             with open(result, "rb") as file:
                                 st.download_button(
                                     label="💾 SAVE TO COMPUTER",
@@ -311,13 +374,13 @@ with col2:
                             st.balloons()
                         else:
                             st.error(f"❌ Failed: {result}")
-                            if "not available" in result.lower():
-                                st.info("💡 Tip: This video might be restricted, private, or blocked in the server's region.")
+                            if "not available" in str(result).lower():
+                                st.info("💡 Tip: This video might be private, region-restricted, or requires authentication.")
                 else:
                     with st.spinner("Fetching Image..."):
                         success, result = download_image(target_url, download_folder)
-                        if success:
-                            st.success("✅ Image ready!")
+                        if success and os.path.exists(result):
+                            st.success("✅ Image processed!")
                             with open(result, "rb") as file:
                                 st.download_button(
                                     label="💾 SAVE IMAGE TO COMPUTER",
@@ -334,4 +397,4 @@ with col2:
 
 # Footer
 st.divider()
-st.markdown("<p style='text-align: center; color: #475569;'>Powered by yt-dlp & Streamlit | Professional Download Suite</p>", unsafe_allow_html=True)
+st.markdown("<p style='text-align: center; color: #64748b;'>Powered by yt-dlp & Streamlit | Professional Download Suite</p>", unsafe_allow_html=True)
