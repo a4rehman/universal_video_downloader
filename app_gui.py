@@ -63,12 +63,12 @@ class DownloadItem:
             opts['format'] = self.quality_key or 'bestvideo+bestaudio/best'
             opts['merge_output_format'] = 'mp4'
         else:
-            q = (self.quality_key or '192').replace('k', '').strip()
+            q = re.sub(r"\D", "", ((self.quality_key or "192").split(" ")[0]))
             opts['format'] = 'bestaudio/best'
             opts['postprocessors'] = [{
                 'key': 'FFmpegExtractAudio',
                 'preferredcodec': 'mp3',
-                'preferredquality': q,
+                'preferredquality': q or '192',
             }]
         return opts
 
