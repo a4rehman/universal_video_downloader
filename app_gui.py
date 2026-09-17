@@ -24,17 +24,22 @@ HISTORY_PATH = os.path.join(os.path.expanduser("~"), ".omnistream_history.json")
 CONFIG_PATH = os.path.join(os.path.expanduser("~"), ".omnistream_config.json")
 
 # YouTube player client fallback chains, tried in order.
-# A forced client (e.g. 'ios') now trips YouTube bot detection on datacenter IPs.
+# YouTube now enforces proof-of-origin (PO) tokens for many clients on datacenter IPs,
+# which turns downloads into HTTP 403. 'visionos' and 'web_embedded' currently expose
+# playable formats without any token.
 YOUTUBE_CLIENT_CHAINS = [
+    ["visionos", "web_embedded"],
     ["android_vr", "tv", "web_safari"],
     ["web", "android", "mweb"],
 ]
 
 
-def is_bot_block(msg):
+def should_retry_client(msg):
     low = str(msg).lower()
     return any(k in low for k in (
         "sign in to confirm", "not a bot", "login_required", "po_token",
+        "confirm your age", "unavailable", "unplayable",
+        "playback on other websites", "requested format is not available",
     ))
 
 ILLEGAL = re.compile(r'[\\/:*?"<>|\x00-\x1f]')
@@ -156,7 +161,7 @@ class DownloadItem:
                     ydl_opts.pop('cookiesfrombrowser', None)
                     cookie_tried = True
                     continue
-                if is_bot_block(msg) and client_index < len(YOUTUBE_CLIENT_CHAINS) - 1:
+                if should_retry_client(msg) and client_index < len(YOUTUBE_CLIENT_CHAINS) - 1:
                     client_index += 1
                     app.log(f"YouTube flagged this client. Retrying with {YOUTUBE_CLIENT_CHAINS[client_index]}...")
                     continue

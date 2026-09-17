@@ -7,17 +7,22 @@ from io import BytesIO
 import time
 
 # YouTube player client fallback chains, tried in order.
-# Forcing a single client (e.g. 'ios') now trips YouTube bot detection on cloud IPs.
+# YouTube now enforces proof-of-origin (PO) tokens for many clients on datacenter IPs,
+# which turns downloads into HTTP 403. 'visionos' and 'web_embedded' currently expose
+# playable formats without any token.
 YOUTUBE_CLIENT_CHAINS = [
+    ['visionos', 'web_embedded'],
     ['android_vr', 'tv', 'web_safari'],
     ['web', 'android', 'mweb'],
 ]
 
 
-def is_bot_block(msg):
+def should_retry_client(msg):
     low = str(msg).lower()
     return any(k in low for k in (
         "sign in to confirm", "not a bot", "login_required", "po_token",
+        "confirm your age", "unavailable", "unplayable",
+        "playback on other websites", "requested format is not available",
     ))
 
 # --- Page Config ---
@@ -179,37 +184,6 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# --- Authentication ---
-def check_password():
-    try:
-        APP_PASSWORD = st.secrets["APP_PASSWORD"]
-    except Exception:
-        APP_PASSWORD = os.environ.get("APP_PASSWORD", "admin")
-
-    def password_entered():
-        if st.session_state["password"] == APP_PASSWORD:
-            st.session_state["password_correct"] = True
-            del st.session_state["password"]
-        else:
-            st.session_state["password_correct"] = False
-
-    if st.session_state.get("password_correct", False):
-        return True
-
-    st.markdown('<div class="title-text" style="font-size: 2.5rem; margin-top: 5rem;">🔒 Access Restricted</div>', unsafe_allow_html=True)
-    st.markdown('<div class="subtitle-text">Please enter the password to access OmniStream</div>', unsafe_allow_html=True)
-    
-    col1, col2, col3 = st.columns([1, 2, 1])
-    with col2:
-        st.text_input("Password", type="password", on_change=password_entered, key="password", label_visibility="collapsed", placeholder="Enter Password")
-        if "password_correct" in st.session_state and not st.session_state["password_correct"]:
-            st.error("😕 Incorrect password")
-            
-    return False
-
-if not check_password():
-    st.stop()
-
 # --- Logic Functions ---
 
 def download_video(url, format_type, download_path):
@@ -323,7 +297,7 @@ def download_video(url, format_type, download_path):
                         filename = ydl.prepare_filename(info)
                 except Exception as e2:
                     last_error = f"Fallback failed: {str(e2)}"
-            elif is_bot_block(last_error) and chain is not YOUTUBE_CLIENT_CHAINS[-1]:
+            elif should_retry_client(last_error) and chain is not YOUTUBE_CLIENT_CHAINS[-1]:
                 st.warning("⚠️ YouTube flagged this client. Retrying with alternate player clients...")
                 continue
             else:

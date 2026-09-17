@@ -8,7 +8,7 @@ OmniStream is a professional, universal downloader for videos, audio, and images
 
 ### 🌐 Web Dashboard (Streamlit)
 *   **Premium Visuals & Animations:** Animated fluid gradient backgrounds, glowing hover-sensitive cards, shimmer title text, and micro-interactions.
-*   **Secure Access:** Lock your downloader page with password authentication (configurable via environment variables, default: `admin`).
+*   **Open Access:** Publicly accessible with no login required.
 *   **Flexible Media Types:** Support for Video downloads (mp4 format), Audio extraction (mp3 format), and Image downloads.
 *   **Automatic Quality Fallbacks:** Intelligently checks for FFmpeg to download highest resolutions (e.g., 1080p+), with automatic fallbacks to best compatible 720p if FFmpeg is missing.
 *   **Real-time Progress:** Displays download speed, percentage completion, and estimated time of arrival (ETA).
@@ -29,6 +29,8 @@ OmniStream is a professional, universal downloader for videos, audio, and images
     *   *Windows installation:* `winget install Gyan.FFmpeg` or download from [ffmpeg.org](https://ffmpeg.org).
     *   *macOS installation:* `brew install ffmpeg`
     *   *Linux installation:* `sudo apt install ffmpeg`
+*   **Node.js (Recommended):** Used by yt-dlp to solve YouTube's JavaScript challenges, which unlocks full-quality streams without cookies.
+    *   *Installation:* `winget install OpenJS.NodeJS`, `brew install node`, or `sudo apt install nodejs`.
 
 ---
 
@@ -64,7 +66,6 @@ Start the Streamlit development server:
 streamlit run app.py
 ```
 This will open the web interface in your default browser at `http://localhost:8501`.
-*   **Default Password:** `admin` (To customize, set the environment variable `APP_PASSWORD` or add `APP_PASSWORD` to Streamlit secrets).
 
 ### Option B: Run the Desktop GUI
 Launch the CustomTkinter desktop interface:
@@ -84,7 +85,7 @@ OmniStream is ready for Docker. To build and run the Streamlit web dashboard in 
     ```
 2.  **Run the Container:**
     ```bash
-    docker run -d -p 8501:8501 --name omnistream_app -e APP_PASSWORD=your_secure_password omnistream
+    docker run -d -p 8501:8501 --name omnistream_app omnistream
     ```
 3.  Navigate to `http://localhost:8501` to use the downloader.
 

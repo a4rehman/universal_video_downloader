@@ -1,5 +1,5 @@
 streamlit
-yt-dlp>=2026.07
+yt-dlp[default]>=2026.08
 requests
 Pillow
 customtkinter
