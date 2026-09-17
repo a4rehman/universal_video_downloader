@@ -184,6 +184,25 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
+def is_network_online():
+    for test_url in ["https://1.1.1.1", "https://8.8.8.8", "https://www.google.com"]:
+        try:
+            res = requests.get(test_url, timeout=3)
+            if res.status_code == 200:
+                return True
+        except Exception:
+            pass
+    return False
+
+def wait_for_network(status_widget=None):
+    if not is_network_online():
+        if status_widget:
+            status_widget.warning("⚠️ Internet connection lost. Waiting for Wi-Fi reconnection...")
+        while not is_network_online():
+            time.sleep(3)
+        if status_widget:
+            status_widget.success("⚡ Internet restored! Resuming downloads...")
+
 # --- Logic Functions ---
 
 def download_video(url, format_type, download_path):
@@ -212,7 +231,12 @@ def download_video(url, format_type, download_path):
 
     def build_opts(client_chain):
         ydl_opts: dict = {
-            'outtmpl': os.path.join(download_path, '%(title)s.%(ext)s'),
+            'outtmpl': os.path.join(download_path, '%(channel,uploader&{}/|)s%(playlist_title&{}/|)s%(title)s.%(ext)s'),
+            'nooverwrites': True,
+            'continuedl': True,
+            'retries': 100,
+            'fragment_retries': 100,
+            'skip_unavailable_fragments': True,
             'noplaylist': False,
             'ignoreerrors': False,
             'no_warnings': False,

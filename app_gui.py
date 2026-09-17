@@ -23,6 +23,25 @@ ACCENTS = {
 HISTORY_PATH = os.path.join(os.path.expanduser("~"), ".omnistream_history.json")
 CONFIG_PATH = os.path.join(os.path.expanduser("~"), ".omnistream_config.json")
 
+def is_network_online():
+    for test_url in ["https://1.1.1.1", "https://8.8.8.8", "https://www.google.com"]:
+        try:
+            res = requests.get(test_url, timeout=3)
+            if res.status_code == 200:
+                return True
+        except Exception:
+            pass
+    return False
+
+def wait_for_network(app_log=None):
+    if not is_network_online():
+        if app_log:
+            app_log("⚠️ Connection lost. Waiting for Wi-Fi reconnection...")
+        while not is_network_online():
+            time.sleep(3)
+        if app_log:
+            app_log("⚡ Internet re-connected! Resuming downloads...")
+
 # YouTube player client fallback chains, tried in order.
 # YouTube now enforces proof-of-origin (PO) tokens for many clients on datacenter IPs,
 # which turns downloads into HTTP 403. 'visionos' and 'web_embedded' currently expose
@@ -68,7 +87,12 @@ class DownloadItem:
 
     def build_opts(self, client_chain=None):
         opts = {
-            'outtmpl': os.path.join(self.app.config.get("download_path", os.path.expanduser("~/Downloads")), '%(title)s.%(ext)s'),
+            'outtmpl': os.path.join(self.app.config.get("download_path", os.path.expanduser("~/Downloads")), '%(channel,uploader&{}/|)s%(playlist_title&{}/|)s%(title)s.%(ext)s'),
+            'nooverwrites': True,
+            'continuedl': True,
+            'retries': 100,
+            'fragment_retries': 100,
+            'skip_unavailable_fragments': True,
             'noplaylist': not self.app.config.get("playlist", True),
             'ignoreerrors': True,
             'extractor_args': {'youtube': {'player_client': client_chain or YOUTUBE_CLIENT_CHAINS[0]}},
