@@ -6,6 +6,20 @@ from PIL import Image
 from io import BytesIO
 import time
 
+# YouTube player client fallback chains, tried in order.
+# Forcing a single client (e.g. 'ios') now trips YouTube bot detection on cloud IPs.
+YOUTUBE_CLIENT_CHAINS = [
+    ['android_vr', 'tv', 'web_safari'],
+    ['web', 'android', 'mweb'],
+]
+
+
+def is_bot_block(msg):
+    low = str(msg).lower()
+    return any(k in low for k in (
+        "sign in to confirm", "not a bot", "login_required", "po_token",
+    ))
+
 # --- Page Config ---
 st.set_page_config(
     page_title="OmniStream | Universal Downloader",
@@ -208,39 +222,6 @@ def download_video(url, format_type, download_path):
     except Exception:
         files_before = set()
 
-    # Base options
-    ydl_opts: dict = {
-        'outtmpl': os.path.join(download_path, '%(title)s.%(ext)s'),
-        'noplaylist': False,
-        'ignoreerrors': False,
-        'no_warnings': False,
-        'nocheckcertificate': True,
-        'quiet': True,
-        'extractor_args': {
-            'youtube': {
-                'player_client': ['ios'],
-            }
-        },
-        'http_headers': {
-            'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_3 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.3 Mobile/15E148 Safari/604.1',
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-            'Accept-Language': 'en-US,en;q=0.9',
-        },
-        'js_runtimes': {'node': {}, 'deno': {}},
-        'remote_components': ['ejs:github'],
-    }
-
-    if format_type == 'Video':
-        ydl_opts['format'] = 'bestvideo+bestaudio/best'
-        ydl_opts['merge_output_format'] = 'mp4'
-    else:
-        ydl_opts['format'] = 'bestaudio/best'
-        ydl_opts['postprocessors'] = [{
-            'key': 'FFmpegExtractAudio',
-            'preferredcodec': 'mp3',
-            'preferredquality': '192',
-        }]
-
     progress_bar = st.progress(0, text="Initializing...")
     status_text = st.empty()
 
@@ -255,60 +236,106 @@ def download_video(url, format_type, download_path):
         if d['status'] == 'finished':
             progress_bar.progress(1.0, text="Download Complete! Post-processing...")
 
-    ydl_opts['progress_hooks'] = [progress_hook]
+    def build_opts(client_chain):
+        ydl_opts: dict = {
+            'outtmpl': os.path.join(download_path, '%(title)s.%(ext)s'),
+            'noplaylist': False,
+            'ignoreerrors': False,
+            'no_warnings': False,
+            'nocheckcertificate': True,
+            'quiet': True,
+            'extractor_args': {
+                'youtube': {
+                    'player_client': client_chain,
+                }
+            },
+            'http_headers': {
+                'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_3 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.3 Mobile/15E148 Safari/604.1',
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+                'Accept-Language': 'en-US,en;q=0.9',
+            },
+            'js_runtimes': {'node': {}, 'deno': {}},
+            'remote_components': ['ejs:github'],
+            'progress_hooks': [progress_hook],
+        }
 
-    filename = None
-    try:
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(url, download=True)
-            if 'entries' in info:
-                filename = ydl.prepare_filename(info['entries'][0])
-            else:
-                filename = ydl.prepare_filename(info)
-    except Exception as e:
-        error_msg = str(e)
-        if "ffmpeg" in error_msg.lower():
-            st.warning("⚠️ FFmpeg issue. Falling back to best compatible resolution...")
-            ydl_opts['format'] = 'best'
-            if 'postprocessors' in ydl_opts: 
-                ydl_opts.pop('postprocessors', None)
-            try:
-                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                    info = ydl.extract_info(url, download=True)
-                    filename = ydl.prepare_filename(info)
-            except Exception as e2:
-                return False, f"Fallback failed: {str(e2)}"
+        if format_type == 'Video':
+            ydl_opts['format'] = 'bestvideo+bestaudio/best'
+            ydl_opts['merge_output_format'] = 'mp4'
         else:
-            return False, error_msg
+            ydl_opts['format'] = 'bestaudio/best'
+            ydl_opts['postprocessors'] = [{
+                'key': 'FFmpegExtractAudio',
+                'preferredcodec': 'mp3',
+                'preferredquality': '192',
+            }]
+        return ydl_opts
 
-    # Robust detection of the downloaded file
-    if filename and os.path.exists(filename):
-        return True, filename
+    def locate_output(filename):
+        if filename and os.path.exists(filename):
+            return filename
 
-    # Look for newly added files in directory
-    try:
-        files_after = set(os.listdir(download_path))
-        new_files = files_after - files_before
-        if new_files:
-            new_files_list = [os.path.join(download_path, f) for f in new_files]
-            newest_file = max(new_files_list, key=os.path.getmtime)
-            if os.path.exists(newest_file):
-                return True, newest_file
-    except Exception:
-        pass
-
-    # Look for files matching the base title
-    if filename:
-        base = os.path.splitext(filename)[0]
+        # Look for newly added files in directory
         try:
-            for f in os.listdir(download_path):
-                if f.startswith(os.path.basename(base)):
-                    full_p = os.path.join(download_path, f)
-                    if os.path.exists(full_p):
-                        return True, full_p
+            files_after = set(os.listdir(download_path))
+            new_files = files_after - files_before
+            if new_files:
+                new_files_list = [os.path.join(download_path, f) for f in new_files]
+                newest_file = max(new_files_list, key=os.path.getmtime)
+                if os.path.exists(newest_file):
+                    return newest_file
         except Exception:
             pass
 
+        # Look for files matching the base title
+        if filename:
+            base = os.path.splitext(filename)[0]
+            try:
+                for f in os.listdir(download_path):
+                    if f.startswith(os.path.basename(base)):
+                        full_p = os.path.join(download_path, f)
+                        if os.path.exists(full_p):
+                            return full_p
+            except Exception:
+                pass
+        return None
+
+    last_error = None
+    for chain in YOUTUBE_CLIENT_CHAINS:
+        filename = None
+        try:
+            with yt_dlp.YoutubeDL(build_opts(chain)) as ydl:
+                info = ydl.extract_info(url, download=True)
+                if 'entries' in info:
+                    filename = ydl.prepare_filename(info['entries'][0])
+                else:
+                    filename = ydl.prepare_filename(info)
+        except Exception as e:
+            last_error = str(e)
+            if "ffmpeg" in last_error.lower():
+                st.warning("⚠️ FFmpeg issue. Falling back to best compatible resolution...")
+                opts = build_opts(chain)
+                opts['format'] = 'best'
+                opts.pop('postprocessors', None)
+                try:
+                    with yt_dlp.YoutubeDL(opts) as ydl:
+                        info = ydl.extract_info(url, download=True)
+                        filename = ydl.prepare_filename(info)
+                except Exception as e2:
+                    last_error = f"Fallback failed: {str(e2)}"
+            elif is_bot_block(last_error) and chain is not YOUTUBE_CLIENT_CHAINS[-1]:
+                st.warning("⚠️ YouTube flagged this client. Retrying with alternate player clients...")
+                continue
+            else:
+                return False, last_error
+
+        located = locate_output(filename)
+        if located:
+            return True, located
+        break
+
+    if last_error:
+        return False, last_error
     return False, "File downloaded successfully but could not be located on disk."
 
 def download_image(url, download_path):
@@ -388,6 +415,8 @@ with col2:
                             st.error(f"❌ Failed: {result}")
                             if "not available" in str(result).lower():
                                 st.info("💡 Tip: This video might be private, region-restricted, or requires authentication.")
+                            if "not a bot" in str(result).lower() or "sign in to confirm" in str(result).lower():
+                                st.info("💡 Tip: YouTube is rate-limiting this server's IP (bot check). Wait a few minutes and retry.")
                 else:
                     with st.spinner("Fetching Image..."):
                         success, result = download_image(target_url, download_folder)

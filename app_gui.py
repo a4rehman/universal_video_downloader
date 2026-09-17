@@ -23,6 +23,20 @@ ACCENTS = {
 HISTORY_PATH = os.path.join(os.path.expanduser("~"), ".omnistream_history.json")
 CONFIG_PATH = os.path.join(os.path.expanduser("~"), ".omnistream_config.json")
 
+# YouTube player client fallback chains, tried in order.
+# A forced client (e.g. 'ios') now trips YouTube bot detection on datacenter IPs.
+YOUTUBE_CLIENT_CHAINS = [
+    ["android_vr", "tv", "web_safari"],
+    ["web", "android", "mweb"],
+]
+
+
+def is_bot_block(msg):
+    low = str(msg).lower()
+    return any(k in low for k in (
+        "sign in to confirm", "not a bot", "login_required", "po_token",
+    ))
+
 ILLEGAL = re.compile(r'[\\/:*?"<>|\x00-\x1f]')
 
 
@@ -47,12 +61,12 @@ class DownloadItem:
         self.downloaded = "0 B"
         self.total = "?"
 
-    def build_opts(self):
+    def build_opts(self, client_chain=None):
         opts = {
             'outtmpl': os.path.join(self.app.config.get("download_path", os.path.expanduser("~/Downloads")), '%(title)s.%(ext)s'),
             'noplaylist': not self.app.config.get("playlist", True),
             'ignoreerrors': True,
-            'extractor_args': {'youtube': {'player_client': ['android', 'web']}},
+            'extractor_args': {'youtube': {'player_client': client_chain or YOUTUBE_CLIENT_CHAINS[0]}},
         }
         browser = self.app.config.get("cookies_browser")
         if browser and not self.app.cookie_locked.is_set():
@@ -82,8 +96,6 @@ class DownloadItem:
         if self.media_type == "Image":
             return self._download_image(app, download_path)
 
-        ydl_opts = self.build_opts()
-
         def progress_hook(d):
             if d.get('status') == 'downloading':
                 try:
@@ -108,12 +120,14 @@ class DownloadItem:
                 self.stat_display = "Processing/merging..."
                 self._sync_row()
 
-        ydl_opts['progress_hooks'] = [progress_hook]
         self.stat_display = "Preparing..."
         self._sync_row()
 
         cookie_tried = False
+        client_index = 0
         while True:
+            ydl_opts = self.build_opts(YOUTUBE_CLIENT_CHAINS[client_index])
+            ydl_opts['progress_hooks'] = [progress_hook]
             try:
                 with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                     info = ydl.extract_info(self.url, download=True)
@@ -141,6 +155,10 @@ class DownloadItem:
                     app.log("Chrome cookie DB is locked (Chrome running). Retrying without cookies...")
                     ydl_opts.pop('cookiesfrombrowser', None)
                     cookie_tried = True
+                    continue
+                if is_bot_block(msg) and client_index < len(YOUTUBE_CLIENT_CHAINS) - 1:
+                    client_index += 1
+                    app.log(f"YouTube flagged this client. Retrying with {YOUTUBE_CLIENT_CHAINS[client_index]}...")
                     continue
                 if "ffmpeg" in msg.lower():
                     ydl_opts['format'] = 'best'
