@@ -1,0 +1,10 @@
+streamlit
+yt-dlp[default]>=2026.08
+requests
+Pillow
+customtkinter
+pytest
+# Bundles a static ffmpeg build. yt-dlp needs ffmpeg to merge the separate
+# video-only and audio-only streams that sites serve, so without this a video
+# download lands as two unusable files instead of one playable video.
+imageio-ffmpeg>=0.4.9
