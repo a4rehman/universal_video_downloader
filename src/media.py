@@ -62,6 +62,9 @@ class AdvancedOptions:
     embed_subtitles: bool = False
     overwrite_behavior: str = "no_overwrite"  # no_overwrite, overwrite
     raw_format_id: Optional[str] = None
+    # Shorts/Reels filter modes
+    shorts_only: bool = False
+    reels_only: bool = False
 
 
 @dataclass

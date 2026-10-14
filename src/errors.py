@@ -150,6 +150,24 @@ def map_exception_to_user_message(err: Exception) -> Dict[str, Any]:
             "technical_details": tech,
         }
 
+    if "could not copy" in raw_lower and "cookie" in raw_lower:
+        return {
+            "category": ErrorCategory.PERMISSION_ERROR,
+            "title": "Browser Cookie Database Locked",
+            "user_message": "OmniStream could not read cookies because your browser is currently running and locking its database.",
+            "tip": "Close Chrome / Edge completely (including background tasks in the system tray) and try again.",
+            "technical_details": tech,
+        }
+
+    if "facebook.com/login" in raw_lower or ("facebook" in raw_lower and ("login" in raw_lower or "unsupported url" in raw_lower)):
+        return {
+            "category": ErrorCategory.PERMISSION_ERROR,
+            "title": "Facebook Login Required",
+            "user_message": "Facebook redirected to login. This profile or Reels listing requires an active Facebook session.",
+            "tip": "Close Chrome completely so cookies can be accessed, or select browser cookies in Settings, or use direct public video URLs.",
+            "technical_details": tech,
+        }
+
     if "unsupported url" in raw_lower or "no suitable extractor" in raw_lower:
         return {
             "category": ErrorCategory.UNSUPPORTED_URL,

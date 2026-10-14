@@ -17,6 +17,7 @@ from PIL import Image, ImageTk
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
 from src.extractor import extract_media_info
 from src.validators import detect_platform, is_instagram_collection_url
+from src.instagram_scraper import extract_instagram_reels_from_profile
 
 APP_VERSION = "3.0 PREMIUM"
 ACCENTS = {
@@ -337,21 +338,24 @@ class DownloadItem:
                     'player_client': client_chain,
                 }
             }
-            # Required: without a JS runtime YouTube's signature challenge is never
-            # solved and every video fails with "This video is not available".
-            apply_js_runtime(opts)
-            # Desktop UA: a mobile UA makes YouTube serve the mweb channel page,
-            # which yt-dlp's youtube:tab extractor cannot parse.
-            opts['http_headers'] = {'User-Agent': DESKTOP_USER_AGENT}
+
+        # Shared UA / FFmpeg / JS-runtime / cookies handling (kept in one place
+        # with the core downloader so desktop & web cannot drift apart).
+        ffmpeg = resolve_ffmpeg_location()
+        from src.downloader import apply_common_opts
+        apply_common_opts(opts, self.url)
 
         browser = self.app.config.get("cookies_browser")
-        if browser and not self.app.cookie_locked.is_set():
-            opts['cookiesfrombrowser'] = (browser,)
-            self.app.log(f"Using cookies from browser: {browser}")
-
-        ffmpeg = resolve_ffmpeg_location()
-        if ffmpeg:
-            opts['ffmpeg_location'] = ffmpeg
+        cookies_file = self.app.config.get("cookies_file")
+        # Desktop-only guard: if a prior run reported cookies were locked,
+        # skip browser cookies (they can fail with a hard error), but a
+        # user-supplied cookies.txt is still honoured.
+        if cookies_file or (browser and not self.app.cookie_locked.is_set()):
+            from src.cookies import apply_cookie_opts, describe_cookie_source
+            apply_cookie_opts(opts, browser, cookies_file)
+            source = describe_cookie_source(browser, cookies_file)
+            if source:
+                self.app.log(f"Using cookies from: {source}")
 
         if self.media_type == "Video":
             selector = self.quality_key or 'bestvideo+bestaudio/best'
@@ -469,7 +473,8 @@ class DownloadItem:
                     return False, FFMPEG_MISSING_MESSAGE
                 if "cookie" in msg.lower() or "could not copy" in msg.lower():
                     app.cookie_locked.set()
-                    app.log("Chrome cookie DB is locked (Chrome running). Retrying without cookies...")
+                    browser = self.app.config.get("cookies_browser", "browser")
+                    app.log(f"{browser.capitalize()} cookie DB is locked ({browser} running). Retrying without cookies...")
                     cookie_tried = True
                     continue
                 # Only retry with different client chains for YouTube
@@ -500,9 +505,10 @@ class DownloadItem:
     def _resolve_output_file(self, download_path, filename):
         """
         Finds the real merged output file, ignoring per-stream intermediates such
-        as "Title.f399.mp4" which only hold video (or audio) without the other.
+        as "Title.f399.mp4" which only hold video (or audio) without the other,
+        and verifying that the file is not 0 bytes.
         """
-        if filename and os.path.exists(filename) and not is_stream_artifact(filename):
+        if filename and os.path.isfile(filename) and os.path.getsize(filename) > 0 and not is_stream_artifact(filename):
             return filename
         if filename:
             base = os.path.basename(os.path.splitext(filename)[0])
@@ -510,7 +516,9 @@ class DownloadItem:
                 for f in os.listdir(download_path):
                     if f.startswith(base) and not is_stream_artifact(f) \
                             and not f.endswith(('.part', '.ytdl', '.tmp')):
-                        return os.path.join(download_path, f)
+                        cand = os.path.join(download_path, f)
+                        if os.path.isfile(cand) and os.path.getsize(cand) > 0:
+                            return cand
             except Exception:
                 pass
         return None
@@ -686,6 +694,7 @@ class DownloadApp(ctk.CTk):
             "accent": "Violet",
             "max_workers": 3,
             "cookies_browser": "",
+            "cookies_file": "",
             "playlist": True,
             "playlist_limit": 0,
             "max_retries": 8,
@@ -733,6 +742,22 @@ class DownloadApp(ctk.CTk):
         self.save_history()
         self.render_history()
 
+        # Synchronize with shared TiDB Cloud / local repository
+        try:
+            from src.history import add_history_record
+            from src.validators import detect_platform
+            add_history_record(
+                url=url,
+                title=os.path.basename(filename) if isinstance(filename, str) else "Downloaded Media",
+                platform=detect_platform(url),
+                format_type=media_type,
+                resolution="Default",
+                size_str="",
+                file_path=filename if isinstance(filename, str) else "",
+            )
+        except Exception:
+            pass
+
     def notify(self, title, msg, kind="info"):
         try:
             if kind == "err":
@@ -772,10 +797,32 @@ class DownloadApp(ctk.CTk):
                                        hover_color=self.shade(self.accent), command=self.analyze_url)
         self.fetch_btn.grid(row=0, column=1, padx=(0, 10))
 
+        self.extract_reels_btn = ctk.CTkButton(url_row, text="🎞️ Extract Reels", width=150, height=52,
+                                               font=("Inter", 14, "bold"), fg_color="#10b981",
+                                               hover_color="#059669", command=self.extract_instagram_reels)
+        self.extract_reels_btn.grid(row=0, column=2, padx=(0, 10))
+
         self.download_btn = ctk.CTkButton(url_row, text="🚀 Start Download", width=190, height=52,
                                           font=("Inter", 14, "bold"), fg_color=self.accent,
                                           hover_color=self.shade(self.accent), command=self.queue_download)
-        self.download_btn.grid(row=0, column=2)
+        self.download_btn.grid(row=0, column=3)
+
+        # Filter options row (Shorts/Reels only)
+        self.filter_frame = ctk.CTkFrame(card, fg_color="transparent")
+        self.filter_frame.pack(fill="x", padx=18, pady=(0, 6))
+        
+        self.shorts_only_var = tk.BooleanVar(value=False)
+        self.reels_only_var = tk.BooleanVar(value=False)
+        
+        self.shorts_only_cb = ctk.CTkCheckBox(self.filter_frame, text="📱 Shorts Only (YouTube)", 
+                                              variable=self.shorts_only_var, font=("Inter", 11),
+                                              text_color="#94a3b8")
+        self.shorts_only_cb.pack(side="left", padx=(0, 10))
+        
+        self.reels_only_cb = ctk.CTkCheckBox(self.filter_frame, text="🎞️ Reels Only (Instagram)", 
+                                             variable=self.reels_only_var, font=("Inter", 11),
+                                             text_color="#94a3b8")
+        self.reels_only_cb.pack(side="left")
 
         # Metadata card
         self.meta_card = self.make_card(page, "📋 Media Preview")
@@ -920,8 +967,66 @@ class DownloadApp(ctk.CTk):
                                               command=self.on_browser_change)
         self.browser_menu.set(self.config.get("cookies_browser", ""))
         self.browser_menu.pack(side="left", padx=12)
-        ctk.CTkLabel(inner4, text="Note: browser must be closed when downloading for cookies to load.",
-                     font=("Inter", 10), text_color="#64748b").pack(side="left", padx=12)
+
+        # Cookies.txt file (recommended for Instagram/Facebook; bypasses App-Bound Encryption)
+        inner4b = ctk.CTkFrame(c4, fg_color="transparent")
+        inner4b.pack(fill="x", padx=18, pady=(0, 10))
+        ctk.CTkLabel(inner4b, text="Cookies file (cookies.txt):", font=("Inter", 12),
+                     text_color="#94a3b8").pack(side="left")
+        self.cookies_file_var = ctk.StringVar(value=self.config.get("cookies_file", ""))
+        self.cookies_file_entry = ctk.CTkEntry(inner4b, textvariable=self.cookies_file_var,
+                                               width=380, height=34, font=("Inter", 12),
+                                               placeholder_text="Path to exported cookies.txt (optional)")
+        self.cookies_file_entry.pack(side="left", padx=12)
+        self.cookies_file_entry.bind("<FocusOut>", lambda e: self.on_cookies_file_change())
+        self.cookies_file_entry.bind("<Return>", lambda e: self.on_cookies_file_change())
+        # TiDB Cloud Database Status & Sync Card
+        c_db = self.make_card(page, "☁️ Cloud Database (TiDB Cloud Serverless)")
+        inner_db = ctk.CTkFrame(c_db, fg_color="transparent")
+        inner_db.pack(fill="x", padx=18, pady=(10, 16))
+
+        try:
+            from src.database import get_database_status, sync_local_to_cloud, apply_migrations
+            db_stat = get_database_status()
+            db_lbl = f"Status: {db_stat.get('label', 'Not configured')}"
+            db_msg = db_stat.get('message', '')
+        except Exception as e:
+            db_lbl = "Status: Not configured (Local Storage)"
+            db_msg = str(e)
+
+        ctk.CTkLabel(inner_db, text=db_lbl, font=("Inter", 12, "bold"),
+                     text_color="#34d399" if "Connected" in db_lbl else "#94a3b8").pack(anchor="w", pady=(0, 4))
+        ctk.CTkLabel(inner_db, text=db_msg, font=("Inter", 11),
+                     text_color="#64748b", wraplength=700, justify="left").pack(anchor="w", pady=(0, 12))
+
+        btn_row_db = ctk.CTkFrame(inner_db, fg_color="transparent")
+        btn_row_db.pack(fill="x")
+
+        def on_sync_db():
+            try:
+                from src.database import sync_local_to_cloud
+                h_c, f_c = sync_local_to_cloud()
+                self.notify("TiDB Cloud Sync", f"Synced {h_c} history items and {f_c} favorites to TiDB Cloud!")
+            except Exception as e:
+                self.notify("Sync Error", str(e), kind="err")
+
+        def on_migrate_db():
+            try:
+                from src.database import apply_migrations
+                ok, msg = apply_migrations()
+                if ok:
+                    self.notify("TiDB Migration", msg)
+                else:
+                    self.notify("Migration Error", msg, kind="err")
+            except Exception as e:
+                self.notify("Migration Error", str(e), kind="err")
+
+        ctk.CTkButton(btn_row_db, text="🔄 Sync Local to Cloud", height=34, font=("Inter", 12),
+                      fg_color=self.accent, hover_color=self.shade(self.accent),
+                      command=on_sync_db).pack(side="left", padx=(0, 10))
+        ctk.CTkButton(btn_row_db, text="⚡ Run Migrations", height=34, font=("Inter", 12),
+                      fg_color="#0b1220", hover_color="#16203a",
+                      command=on_migrate_db).pack(side="left")
 
         c5 = self.make_card(page, "❔ Quick Help")
         help_text = (
@@ -1045,6 +1150,79 @@ class DownloadApp(ctk.CTk):
         thread = threading.Thread(target=self._analyze_worker, args=(url, mt), daemon=True)
         thread.start()
 
+    def extract_instagram_reels(self):
+        """Extract Reels from an Instagram profile URL and add to batch downloader."""
+        url = self.url_entry.get().strip()
+        if not url:
+            messagebox.showwarning("No link", "Paste an Instagram profile or reels listing URL first.", parent=self)
+            return
+        
+        from src.validators import classify_instagram_url, InstagramURLType
+        url_type = classify_instagram_url(url)
+        if url_type not in (InstagramURLType.PROFILE, InstagramURLType.REELS):
+            messagebox.showwarning("Invalid URL", "Please paste an Instagram profile URL (e.g., https://www.instagram.com/username/) or reels listing URL (https://www.instagram.com/username/reels/).", parent=self)
+            return
+        
+        cookies_browser = self.config.get("cookies_browser") or None
+        cookies_file = self.config.get("cookies_file") or None
+        if not cookies_browser and not cookies_file:
+            messagebox.showwarning(
+                "Cookies Required",
+                "Instagram requires authentication. Set a cookies.txt file in Settings "
+                "(recommended — export it with a browser extension while logged in), "
+                "or set browser cookies and try again.",
+                parent=self)
+            return
+        
+        self.set_analyzing(True)
+        self.extract_reels_btn.configure(state="disabled", text="⏳ Extracting...")
+        self.log(f"Extracting Reels from: {url}")
+        
+        thread = threading.Thread(target=self._extract_reels_worker, args=(url,), daemon=True)
+        thread.start()
+
+    def _extract_reels_worker(self, url):
+        try:
+            cookies_browser = self.config.get("cookies_browser") or None
+            cookies_file = self.config.get("cookies_file") or None
+            self.after(1, lambda: self.log("Fetching Reels from profile using saved cookies..."))
+            
+            reel_urls = extract_instagram_reels_from_profile(
+                url, cookies_browser=cookies_browser, max_reels=100, cookies_file=cookies_file
+            )
+            
+            if not reel_urls:
+                self.after(1, lambda: messagebox.showwarning("No Reels Found", "No Reels found or profile may be private/empty.", parent=self))
+                return
+            
+            self.after(1, lambda: self.log(f"Found {len(reel_urls)} Reels. Opening Batch Downloader..."))
+            
+            # Switch to Batch Downloader tab and populate
+            self.after(1, lambda: self._populate_batch_downloader(reel_urls))
+            
+        except Exception as e:
+            error_msg = str(e)
+            self.after(1, lambda: messagebox.showerror("Extraction Failed", f"Failed to extract Reels:\n{error_msg}", parent=self))
+            self.after(1, lambda: self.log(f"Error: {error_msg}"))
+        finally:
+            self.after(1, lambda: self.set_analyzing(False))
+            self.after(1, lambda: self.extract_reels_btn.configure(state="normal", text="🎞️ Extract Reels"))
+
+    def _populate_batch_downloader(self, urls):
+        """Switch to Batch Downloader tab and populate with URLs."""
+        self.batch_urls_text = "\n".join(urls)
+        # Find the batch downloader page and populate
+        if hasattr(self, 'pages') and 'batch' in self.pages:
+            batch_page = self.pages['batch']
+            # Find the text area in batch page
+            for widget in batch_page.winfo_children():
+                if isinstance(widget, ctk.CTkTextbox):
+                    widget.delete("1.0", "end")
+                    widget.insert("1.0", "\n".join(urls))
+                    break
+        self.switch("batch")
+        self.log(f"Populated Batch Downloader with {len(urls)} Reel URLs")
+
     def _analyze_worker(self, url, mt):
         try:
             self._analyze_worker_inner(url, mt)
@@ -1074,14 +1252,26 @@ class DownloadApp(ctk.CTk):
     def _analyze_worker_inner(self, url, mt):
         # Use shared extractor for Instagram URLs
         platform = detect_platform(url)
+        
+        # Get filter options from UI
+        shorts_only = False
+        reels_only = False
+        if hasattr(self, 'shorts_only_var'):
+            shorts_only = self.shorts_only_var.get()
+        if hasattr(self, 'reels_only_var'):
+            reels_only = self.reels_only_var.get()
+        
         if platform.startswith("Instagram") and is_instagram_collection_url(url):
             try:
                 cookies_browser = self.config.get("cookies_browser") or None
+                cookies_file = self.config.get("cookies_file") or None
                 limit = int(self.config.get("playlist_limit", 0) or 0)
                 meta = extract_media_info(
                     url,
                     cookies_browser=cookies_browser,
                     playlist_limit=limit if limit > 0 else None,
+                    reels_only=reels_only,
+                    cookies_file=cookies_file,
                 )
                 # Convert MediaMetadata to dict format expected by _render_meta
                 info = {
@@ -1162,6 +1352,9 @@ class DownloadApp(ctk.CTk):
             if base_info is not None:
                 if merged:
                     base_info = dict(base_info)
+                    # Apply shorts_only filter if enabled
+                    if shorts_only:
+                        merged = [m for m in merged if m.get("duration", 0) > 0 and m.get("duration", 60) < 60]
                     base_info["entries"] = merged
                     base_info["playlist_count"] = len(merged)
                     base_info["_app_merged_tabs"] = True
@@ -1321,11 +1514,11 @@ class DownloadApp(ctk.CTk):
         """Show a dialog to select/deselect playlist items before downloading."""
         dialog = ctk.CTkToplevel(self)
         dialog.title(f"Select {platform} Items to Download")
-        dialog.geometry("700x500")
+        dialog.geometry("800x550")
         dialog.transient(self)
         dialog.grab_set()
         dialog.grid_columnconfigure(0, weight=1)
-        dialog.grid_rowconfigure(1, weight=1)
+        dialog.grid_rowconfigure(2, weight=1)
 
         # Header
         header = ctk.CTkFrame(dialog, fg_color="transparent")
@@ -1344,33 +1537,49 @@ class DownloadApp(ctk.CTk):
         ctk.CTkButton(btn_frame, text="Deselect All", width=100, height=30,
                       command=lambda: self._select_all_in_dialog(entries, False),
                       fg_color="#0b1220", hover_color="#16203a").pack(side="left", padx=5)
+        ctk.CTkButton(btn_frame, text="Invert Selection", width=120, height=30,
+                      command=lambda: self._invert_selection_in_dialog(entries),
+                      fg_color="#0b1220", hover_color="#16203a").pack(side="left", padx=5)
+
+        # Search/Filter bar
+        filter_bar = ctk.CTkFrame(dialog, fg_color="transparent")
+        filter_bar.grid(row=1, column=0, sticky="ew", padx=20, pady=(0, 10))
+        filter_bar.grid_columnconfigure(0, weight=1)
+        
+        self._dialog_search_var = tk.StringVar()
+        self._dialog_search_var.trace_add("write", lambda *args: self._filter_dialog_entries(entries))
+        
+        search_entry = ctk.CTkEntry(filter_bar, placeholder_text="🔍 Search by title...", 
+                                    textvariable=self._dialog_search_var,
+                                    height=36, font=("Inter", 12), fg_color="#0b1220",
+                                    border_color="#1e293b", corner_radius=8)
+        search_entry.grid(row=0, column=0, sticky="ew", padx=(0, 10))
+        
+        ctk.CTkLabel(filter_bar, text="Duration:", font=("Inter", 11), text_color="#94a3b8").grid(row=0, column=1, padx=(0, 5))
+        self._dialog_duration_filter = ctk.CTkOptionMenu(filter_bar, values=["Any", "Shorts (< 60s)", "Long (> 60s)"],
+                                                         width=130, height=36, font=("Inter", 11),
+                                                         command=lambda _: self._filter_dialog_entries(entries))
+        self._dialog_duration_filter.set("Any")
+        self._dialog_duration_filter.grid(row=0, column=2, padx=(0, 10))
+        
+        ctk.CTkLabel(filter_bar, text="Sort:", font=("Inter", 11), text_color="#94a3b8").grid(row=0, column=3, padx=(0, 5))
+        self._dialog_sort_filter = ctk.CTkOptionMenu(filter_bar, values=["Original Order", "Title (A-Z)", "Duration (Short)", "Duration (Long)"],
+                                                     width=150, height=36, font=("Inter", 11),
+                                                     command=lambda _: self._filter_dialog_entries(entries))
+        self._dialog_sort_filter.set("Original Order")
+        self._dialog_sort_filter.grid(row=0, column=4)
 
         # Scrollable list
-        scroll = ctk.CTkScrollableFrame(dialog, fg_color="transparent")
-        scroll.grid(row=1, column=0, sticky="nsew", padx=20, pady=(0, 10))
-        scroll.grid_columnconfigure(0, weight=1)
+        self._dialog_scroll = ctk.CTkScrollableFrame(dialog, fg_color="transparent")
+        self._dialog_scroll.grid(row=2, column=0, sticky="nsew", padx=20, pady=(0, 10))
+        self._dialog_scroll.grid_columnconfigure(0, weight=1)
 
+        self._dialog_all_entries = entries  # Keep reference to all entries
+        self._dialog_visible_entries = entries  # Currently visible (filtered) entries
         self._dialog_vars = []
-        for idx, entry in enumerate(entries):
-            row = ctk.CTkFrame(scroll, fg_color="#0d1526", corner_radius=8)
-            row.grid(row=idx, column=0, sticky="ew", pady=2)
-            row.grid_columnconfigure(1, weight=1)
-            
-            var = tk.BooleanVar(value=entry.get("selected", True))
-            self._dialog_vars.append((var, entry))
-            
-            chk = ctk.CTkCheckBox(row, text="", variable=var, width=24, height=24)
-            chk.grid(row=0, column=0, padx=10, pady=10)
-            
-            # Thumbnail if available
-            if entry.get("thumbnail"):
-                thumb_lbl = ctk.CTkLabel(row, text="", width=60, height=40)
-                thumb_lbl.grid(row=0, column=1, padx=(0, 10), pady=5)
-                self._load_dialog_thumb(entry["thumbnail"], thumb_lbl)
-            
-            title_lbl = ctk.CTkLabel(row, text=f"#{idx+1} {entry.get('title', 'Untitled')[:80]}",
-                                     font=("Inter", 12), text_color="#e2e8f0", anchor="w")
-            title_lbl.grid(row=0, column=2, sticky="w", padx=10, pady=10)
+        self._dialog_rows = []  # Store row widgets for filtering
+        
+        self._render_dialog_entries(entries)
 
         # Buttons
         btn_row = ctk.CTkFrame(dialog, fg_color="transparent")
@@ -1410,6 +1619,88 @@ class DownloadApp(ctk.CTk):
         # Update the entries list too
         for entry in entries:
             entry["selected"] = select
+
+    def _invert_selection_in_dialog(self, entries):
+        for var, entry in getattr(self, "_dialog_vars", []):
+            var.set(not var.get())
+        for entry in entries:
+            entry["selected"] = not entry.get("selected", True)
+
+    def _filter_dialog_entries(self, entries):
+        """Filter and sort dialog entries based on search/sort criteria."""
+        if not hasattr(self, '_dialog_search_var'):
+            return
+        
+        search_text = self._dialog_search_var.get().lower()
+        duration_filter = self._dialog_duration_filter.get()
+        sort_filter = self._dialog_sort_filter.get()
+        
+        # Filter
+        filtered = []
+        for entry in self._dialog_all_entries:
+            # Search filter
+            if search_text and search_text not in entry.get("title", "").lower():
+                continue
+            
+            # Duration filter
+            if duration_filter != "Any":
+                dur = entry.get("duration", 0)
+                if duration_filter == "Shorts (< 60s)" and (not dur or dur >= 60):
+                    continue
+                if duration_filter == "Long (> 60s)" and (not dur or dur < 60):
+                    continue
+            
+            filtered.append(entry)
+        
+        # Sort
+        if sort_filter == "Title (A-Z)":
+            filtered.sort(key=lambda e: e.get("title", "").lower())
+        elif sort_filter == "Duration (Short)":
+            filtered.sort(key=lambda e: e.get("duration", 0) or 0)
+        elif sort_filter == "Duration (Long)":
+            filtered.sort(key=lambda e: e.get("duration", 0) or 0, reverse=True)
+        # "Original Order" keeps original order
+        
+        self._dialog_visible_entries = filtered
+        self._render_dialog_entries(filtered)
+
+    def _render_dialog_entries(self, entries):
+        """Render or re-render the dialog entry list."""
+        # Clear existing rows
+        for row in self._dialog_rows:
+            row.destroy()
+        self._dialog_rows = []
+        self._dialog_vars = []
+        
+        for idx, entry in enumerate(entries):
+            row = ctk.CTkFrame(self._dialog_scroll, fg_color="#0d1526", corner_radius=8)
+            row.grid(row=idx, column=0, sticky="ew", pady=2)
+            row.grid_columnconfigure(1, weight=1)
+            self._dialog_rows.append(row)
+            
+            var = tk.BooleanVar(value=entry.get("selected", True))
+            self._dialog_vars.append((var, entry))
+            
+            chk = ctk.CTkCheckBox(row, text="", variable=var, width=24, height=24)
+            chk.grid(row=0, column=0, padx=10, pady=10)
+            
+            # Thumbnail if available
+            if entry.get("thumbnail"):
+                thumb_lbl = ctk.CTkLabel(row, text="", width=60, height=40)
+                thumb_lbl.grid(row=0, column=1, padx=(0, 10), pady=5)
+                self._load_dialog_thumb(entry["thumbnail"], thumb_lbl)
+            
+            # Title with duration
+            title = entry.get('title', 'Untitled')[:80]
+            dur = entry.get("duration")
+            if dur:
+                mins, secs = divmod(int(dur), 60)
+                dur_str = f"{mins}:{secs:02d}"
+                title += f"  [{dur_str}]"
+            
+            title_lbl = ctk.CTkLabel(row, text=f"#{idx+1} {title}",
+                                     font=("Inter", 12), text_color="#e2e8f0", anchor="w")
+            title_lbl.grid(row=0, column=2, sticky="w", padx=10, pady=10)
 
     def _load_dialog_thumb(self, thumb_url, label):
         """Load thumbnail for dialog in background."""
@@ -1697,6 +1988,10 @@ class DownloadApp(ctk.CTk):
 
     def on_browser_change(self, val):
         self.config["cookies_browser"] = val if val else ""
+        self.save_config()
+
+    def on_cookies_file_change(self):
+        self.config["cookies_file"] = self.cookies_file_var.get().strip()
         self.save_config()
 
 

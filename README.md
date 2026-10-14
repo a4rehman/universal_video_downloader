@@ -31,28 +31,39 @@ OmniStream/
 ├── app_gui.py              # Desktop GUI Application (CustomTkinter)
 ├── src/                    # Shared Downloader Engine & Business Logic
 │   ├── __init__.py
+│   ├── database.py         # TiDB Cloud Serverless persistence, migrations & offline fallback
 │   ├── downloader.py       # Core yt-dlp downloading service & progress hooks
 │   ├── extractor.py        # URL metadata analysis & playlist parser
 │   ├── formats.py          # Resolution mappings & format string builder
 │   ├── media.py            # Dataclasses (MediaMetadata, DownloadJob, etc.)
+│   ├── platforms.py        # Platform capability registry & diagnostics
 │   ├── queue.py            # Thread-safe download queue & worker pool
-│   ├── history.py          # Download history JSON store (~/.omnistream_history.json)
-│   ├── favorites.py        # Saved favorites JSON store (~/.omnistream_favorites.json)
-│   ├── settings.py         # App configuration JSON store (~/.omnistream_config.json)
+│   ├── history.py          # Download history persistence (TiDB Cloud / local JSON fallback)
+│   ├── favorites.py        # Saved favorites persistence (TiDB Cloud / local JSON fallback)
+│   ├── settings.py         # App configuration persistence (TiDB Cloud / local JSON fallback)
 │   ├── validators.py       # URL syntax, platform detection, filename sanitization
 │   ├── filesystem.py       # Directory management & temp file cleanup
 │   ├── errors.py           # Structured error taxonomy & diagnostic mapper
-│   ├── system.py           # Dependency checks (FFmpeg, Node.js, network status)
+│   ├── system.py           # Dependency checks (FFmpeg, Node.js, network status, TiDB health)
+│   ├── instagram_scraper.py# Browser cookie session extractor
 │   └── ui.py               # Glassmorphism styling & Streamlit UI helpers
+├── scripts/                # Launchers & diagnostics
+│   └── diagnose_shortcuts.ps1 # Desktop shortcut & Python environment verifier
 ├── tests/                  # Automated pytest test suite
 │   ├── conftest.py
+│   ├── test_audit_enhancements.py # File verification & FFmpeg checks
+│   ├── test_database.py    # TiDB Cloud CRUD, parameterization & offline fallback tests
+│   ├── test_downloader.py
 │   ├── test_errors.py
+│   ├── test_extractor.py
 │   ├── test_formats.py
 │   ├── test_history.py
+│   ├── test_regressions.py
 │   ├── test_system.py
 │   └── test_validators.py
 ├── test_gui_logic.py       # Desktop GUI regression tests
-├── requirements.txt        # Python package requirements
+├── .env.example            # Safe template for TiDB Cloud credentials
+├── requirements.txt        # Python package requirements (with pymysql & cryptography)
 ├── packages.txt            # System dependencies (FFmpeg, Node.js)
 ├── Dockerfile              # Production Docker image configuration
 └── README.md
@@ -214,10 +225,54 @@ disk keep their old names.
 
 ---
 
+## ☁️ TiDB Cloud Serverless Integration
+
+OmniStream integrates with **TiDB Cloud Serverless** (a MySQL-compatible distributed relational database) for durable cloud storage of:
+- Download history
+- Favorite bookmarked URLs
+- User application settings & preferences
+
+### 1. Connection Configuration
+
+You can configure TiDB Cloud via environment variables or a local `.env` file (copied from `.env.example`):
+
+```bash
+TIDB_HOST=gateway01.us-east-1.prod.aws.tidbcloud.com
+TIDB_PORT=4000
+TIDB_USER=your_cluster_prefix.root
+TIDB_PASSWORD=your_cluster_password
+TIDB_DATABASE=omnistream
+TIDB_SSL_MODE=REQUIRED
+```
+
+### 2. Streamlit Community Cloud Deployment
+
+Add your database connection to Streamlit Secrets (`.streamlit/secrets.toml` or Streamlit Cloud Dashboard):
+
+```toml
+[database]
+host = "gateway01.us-east-1.prod.aws.tidbcloud.com"
+port = 4000
+user = "your_cluster_prefix.root"
+password = "your_cluster_password"
+database = "omnistream"
+ssl_mode = "REQUIRED"
+```
+
+### 3. Graceful Offline Fallback & Migration
+
+- **Offline / Local Mode**: If TiDB is not configured or network access fails, OmniStream transparently stores and reads data from local JSON files (`~/.omnistream_history.json`, etc.).
+- **Auto Migrations**: Versioned database migrations create tables automatically on first connection.
+- **One-Click Sync**: The Settings page provides a "Sync Local to Cloud" button to migrate local history and favorites into TiDB Cloud without duplicate records.
+
+---
+
 ## 🔒 Security & Privacy
 
 - All user inputs are sanitized against path traversal (`../`) and illegal filename characters.
-- Environment variables and user preferences are safely isolated.
+- Database passwords and tokens are never printed to terminal logs, screenshots, UI, or serialized artifacts.
+- Parameterized SQL queries (`%s`) protect all database operations from SQL injection.
+- `.env` and local credentials are strictly ignored in `.gitignore`.
 - Downloads are executed strictly within designated target directories.
 
 ---

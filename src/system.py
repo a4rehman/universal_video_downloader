@@ -36,30 +36,54 @@ def check_ffprobe() -> bool:
 _FFMPEG_CACHE: Dict[str, Any] = {}
 
 
+def _verify_executable(path: str) -> bool:
+    """Verifies that an executable exists, is executable, and can execute without crashing."""
+    if not path or not os.path.exists(path):
+        return False
+    try:
+        startupinfo = None
+        if os.name == "nt":
+            startupinfo = subprocess.STARTUPINFO()
+            startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+        res = subprocess.run(
+            [path, "-version"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=5,
+            startupinfo=startupinfo,
+        )
+        return res.returncode == 0
+    except Exception:
+        return False
+
+
 def resolve_ffmpeg_path() -> Optional[str]:
     """
     Resolves a usable ffmpeg executable path.
 
     Priority order:
-      1. System ffmpeg available on PATH.
-      2. Bundled static build shipped by the `imageio-ffmpeg` wheel.
+      1. System ffmpeg available on PATH (verified by running).
+      2. Bundled static build shipped by the `imageio-ffmpeg` wheel (verified by running).
 
     yt-dlp cannot merge separate video-only/audio-only streams without ffmpeg,
     so this resolution is mandatory for producing single playable files.
-    Returns None when no ffmpeg build can be found at all.
+    Returns None when no valid ffmpeg build can be found or verified.
     """
     if "path" in _FFMPEG_CACHE:
         return _FFMPEG_CACHE["path"]
 
-    resolved = shutil.which("ffmpeg")
+    resolved = None
+    system_candidate = shutil.which("ffmpeg")
+    if system_candidate and _verify_executable(system_candidate):
+        resolved = system_candidate
 
     if not resolved:
         try:
             import imageio_ffmpeg
 
-            candidate = imageio_ffmpeg.get_ffmpeg_exe()
-            if candidate and os.path.exists(candidate):
-                resolved = candidate
+            bundled_candidate = imageio_ffmpeg.get_ffmpeg_exe()
+            if bundled_candidate and _verify_executable(bundled_candidate):
+                resolved = bundled_candidate
         except Exception:
             resolved = None
 
@@ -72,13 +96,27 @@ def resolve_ffmpeg_path() -> Optional[str]:
 
 def resolve_ffprobe_path() -> Optional[str]:
     """
-    Resolves an ffprobe path. `imageio-ffmpeg` bundles ffmpeg only, so a system
-    ffprobe install is the only usable source here.
+    Resolves an ffprobe path.
+    Checks system PATH, then checks beside the resolved ffmpeg binary, verifying by running.
     """
     if "probe" in _FFMPEG_CACHE:
         return _FFMPEG_CACHE["probe"]
 
-    resolved = shutil.which("ffprobe")
+    resolved = None
+    system_probe = shutil.which("ffprobe")
+    if system_probe and _verify_executable(system_probe):
+        resolved = system_probe
+
+    if not resolved:
+        ffmpeg_bin = resolve_ffmpeg_path()
+        if ffmpeg_bin:
+            ffmpeg_dir = os.path.dirname(ffmpeg_bin)
+            for name in ("ffprobe.exe", "ffprobe"):
+                candidate = os.path.join(ffmpeg_dir, name)
+                if _verify_executable(candidate):
+                    resolved = candidate
+                    break
+
     if resolved:
         resolved = os.path.abspath(resolved)
 
@@ -207,5 +245,20 @@ def get_system_status() -> Dict[str, Any]:
         "network": {
             "status": online,
             "label": "Online" if online else "Offline / Restricted Connection",
-        }
+        },
+        "database": _get_db_health(),
     }
+
+
+def _get_db_health() -> Dict[str, Any]:
+    try:
+        from .database import get_database_status
+        return get_database_status()
+    except Exception as exc:
+        return {
+            "status": "Not configured",
+            "connected": False,
+            "label": "Not configured",
+            "message": str(exc),
+            "version": 0,
+        }

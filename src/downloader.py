@@ -14,6 +14,7 @@ from .errors import FFmpegError  # noqa: F401  (re-exported for callers/tests)
 from .extractor import DESKTOP_USER_AGENT
 from .system import get_ffmpeg_location, has_ffmpeg, resolve_js_runtime
 from .filesystem import cleanup_stream_artifacts, is_stream_artifact
+from .cookies import apply_cookie_opts
 
 YOUTUBE_CLIENT_CHAINS = [
     ['visionos', 'web_embedded'],
@@ -64,10 +65,10 @@ def locate_output_file(output_dir: str, filename_hint: Optional[str] = None, fil
     """
     Robustly identifies the actual final output file generated on disk.
 
-    Per-stream intermediates ("title.f251.webm") are never accepted as the
-    result, otherwise a failed merge would be reported as a successful download.
+    Per-stream intermediates ("title.f251.webm") and 0-byte corrupted files are
+    never accepted as the result, otherwise a failed merge would be reported as a successful download.
     """
-    if filename_hint and os.path.exists(filename_hint) and not is_stream_artifact(filename_hint):
+    if filename_hint and os.path.isfile(filename_hint) and os.path.getsize(filename_hint) > 0 and not is_stream_artifact(filename_hint):
         return filename_hint
 
     # Check newly created files in directory
@@ -77,7 +78,10 @@ def locate_output_file(output_dir: str, filename_hint: Optional[str] = None, fil
             new_files = files_after - files_before
             candidates = [
                 os.path.join(output_dir, f) for f in new_files
-                if not f.endswith(('.part', '.ytdl', '.tmp')) and not is_stream_artifact(f)
+                if not f.endswith(('.part', '.ytdl', '.tmp'))
+                and not is_stream_artifact(f)
+                and os.path.isfile(os.path.join(output_dir, f))
+                and os.path.getsize(os.path.join(output_dir, f)) > 0
             ]
             if candidates:
                 return max(candidates, key=os.path.getmtime)
@@ -93,7 +97,7 @@ def locate_output_file(output_dir: str, filename_hint: Optional[str] = None, fil
                 if f.startswith(base_name) and not f.endswith(('.part', '.ytdl', '.tmp')) \
                         and not is_stream_artifact(f):
                     full_p = os.path.join(output_dir, f)
-                    if os.path.exists(full_p):
+                    if os.path.isfile(full_p) and os.path.getsize(full_p) > 0:
                         return full_p
         except Exception:
             pass
@@ -102,6 +106,43 @@ def locate_output_file(output_dir: str, filename_hint: Optional[str] = None, fil
 
 
 DEFAULT_OUTPUT_TEMPLATE = "%(title).120s [%(id)s].%(ext)s"
+
+
+def apply_common_opts(
+    ydl_opts: dict,
+    url: str,
+    cookies_browser: Optional[str] = None,
+    cookies_file: Optional[str] = None,
+) -> dict:
+    """
+    Applies the yt-dlp options that both the desktop and web UIs must share:
+    desktop User-Agent, FFmpeg location, YouTube JS runtime, and cookies.
+
+    Centralising these here keeps the two front-ends in sync; previously each
+    built its own copy and a fix in one did not reach the other.
+    """
+    from .validators import detect_platform
+
+    # Desktop UA: a mobile UA breaks YouTube channel/tab listings.
+    ydl_opts.setdefault('http_headers', {})['User-Agent'] = DESKTOP_USER_AGENT
+    ydl_opts['nocheckcertificate'] = True
+    ydl_opts['windowsfilenames'] = True
+    ydl_opts['trim_file_name'] = 180
+
+    ffmpeg_location = get_ffmpeg_location()
+    if ffmpeg_location:
+        ydl_opts['ffmpeg_location'] = ffmpeg_location
+
+    if detect_platform(url) == "YouTube":
+        # Without a JS runtime YouTube's signature challenge is never solved and
+        # every download fails with "This video is not available".
+        js_runtime = resolve_js_runtime()
+        if js_runtime:
+            ydl_opts['js_runtimes'] = js_runtime
+            ydl_opts['remote_components'] = {'ejs:github'}
+
+    apply_cookie_opts(ydl_opts, cookies_browser, cookies_file)
+    return ydl_opts
 
 
 def format_selector_needs_merge(format_selector: str) -> bool:
@@ -154,6 +195,7 @@ def download_media(
     audio_quality: str = "192 kbps",
     options: Optional[AdvancedOptions] = None,
     cookies_browser: Optional[str] = None,
+    cookies_file: Optional[str] = None,
     progress_callback: Optional[Callable[[Dict[str, Any]], None]] = None,
     cancel_event: Optional[Any] = None,
 ) -> Tuple[bool, str]:
@@ -194,6 +236,8 @@ def download_media(
         return False, FFMPEG_MISSING_MESSAGE
 
     outtmpl_pattern = build_output_template(options)
+    from .validators import detect_platform
+    is_youtube = (detect_platform(url) == "YouTube")
 
     def build_opts(client_chain):
         ydl_opts: dict = {
@@ -206,37 +250,21 @@ def download_media(
             'noplaylist': True,
             'ignoreerrors': False,
             'no_warnings': False,
-            'nocheckcertificate': True,
             'quiet': True,
             'format': format_selector,
-            # Let yt-dlp sanitize illegal characters and cap path length itself,
-            # otherwise Windows turns characters such as "|" into "?" .
-            'windowsfilenames': True,
-            'trim_file_name': 180,
-            'extractor_args': {
-                'youtube': {
-                    'player_client': client_chain,
-                }
-            },
-            'http_headers': {
-                # Desktop UA: a mobile UA breaks YouTube channel/tab listings.
-                'User-Agent': DESKTOP_USER_AGENT,
-            },
             'progress_hooks': [internal_progress_hook],
         }
 
-        if ffmpeg_location:
-            ydl_opts['ffmpeg_location'] = ffmpeg_location
+        # Shared UA / FFmpeg / JS-runtime / cookies handling lives in one place
+        # so the desktop and web front-ends cannot drift apart again.
+        apply_common_opts(ydl_opts, url, cookies_browser, cookies_file)
 
-        # Without a JS runtime YouTube's signature challenge is never solved and
-        # every download fails with "This video is not available".
-        js_runtime = resolve_js_runtime()
-        if js_runtime:
-            ydl_opts['js_runtimes'] = js_runtime
-            ydl_opts['remote_components'] = {'ejs:github'}
-
-        if cookies_browser:
-            ydl_opts['cookiesfrombrowser'] = (cookies_browser,)
+        if is_youtube and client_chain:
+            ydl_opts['extractor_args'] = {
+                'youtube': {
+                    'player_client': client_chain,
+                }
+            }
 
         postprocessors = []
 
@@ -244,7 +272,7 @@ def download_media(
             ydl_opts['merge_output_format'] = 'mp4'
             if options.embed_metadata:
                 postprocessors.append({'key': 'FFmpegMetadata'})
-                postprocessors.append({'key': 'FFmpegVideoRemuxerPP'})
+                postprocessors.append({'key': 'FFmpegVideoRemuxer', 'preferedformat': 'mp4'})
             if options.embed_thumbnail:
                 postprocessors.append({'key': 'EmbedThumbnail'})
                 ydl_opts['writethumbnail'] = True
@@ -276,8 +304,9 @@ def download_media(
         return ydl_opts
 
     last_error_msg = None
+    client_chains = YOUTUBE_CLIENT_CHAINS if is_youtube else [None]
 
-    for chain in YOUTUBE_CLIENT_CHAINS:
+    for chain in client_chains:
         filename_hint = None
         opts = build_opts(chain)
         try:
@@ -297,12 +326,12 @@ def download_media(
 
             if "ffmpeg" in last_error_msg.lower():
                 return False, FFMPEG_MISSING_MESSAGE
-            if should_retry_client(last_error_msg) and chain is not YOUTUBE_CLIENT_CHAINS[-1]:
+            if is_youtube and should_retry_client(last_error_msg) and chain is not client_chains[-1]:
                 continue
             return False, last_error_msg
 
         located = locate_output_file(output_dir, filename_hint, files_before)
-        if located and os.path.exists(located):
+        if located and os.path.isfile(located) and os.path.getsize(located) > 0:
             # Best-effort sweep of any leftovers from partial merges.
             cleanup_stream_artifacts(output_dir, keep={located})
             return True, located

@@ -1,16 +1,26 @@
+# Byte-compiled / optimized / DLL files
 __pycache__/
 *.pyc
 *.pyo
 *.pyd
 .Python
+
+# Environments & Virtualenvs
 env/
 venv/
 .venv/
 bin/
-build/
 develop-eggs/
+
+# Distribution & Build
+build/
 dist/
+*.egg-info/
+*.spec.bak
+
+# Media & Downloads
 downloads/
+output/
 *.mp4
 *.mp3
 *.mkv
@@ -18,8 +28,42 @@ downloads/
 *.jpg
 *.png
 *.gif
-.streamlit/
+*.part
+*.ytdl
+*.tmp
+
+# Secrets, Credentials & Local Config
+.env
+.env.*
+!.env.example
+*.env
+credentials.*
+service-account*.json
+*.pem
+*.key
+*.p12
+secrets.*
+tokens.*
+*.cookie
+*.cookies
+cookies.txt
+*.session
+
+# Local Database & Cache
+*.db
+*.sqlite
+*.sqlite3
+.pytest_cache/
+.coverage
+htmlcov/
+*.log
+
+# Editor & OS artifacts
+.streamlit/secrets.toml
 .idea/
 .vscode/
 *.swp
 *.bak
+*.lnk
+Thumbs.db
+[Dd]esktop.ini

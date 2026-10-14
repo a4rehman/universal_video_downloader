@@ -8,11 +8,17 @@ import os
 import time
 from typing import List, Dict, Any
 
+from .database import CloudFavoritesRepository, is_db_configured
+
 FAVORITES_FILE = os.path.join(os.path.expanduser("~"), ".omnistream_favorites.json")
 
 
 def load_favorites() -> List[Dict[str, Any]]:
-    """Loads favorites list from JSON file."""
+    """Loads favorites list from TiDB Cloud or local JSON fallback."""
+    if is_db_configured():
+        favs = CloudFavoritesRepository.load_favorites()
+        if favs:
+            return favs
     if not os.path.exists(FAVORITES_FILE):
         return []
     try:
@@ -24,7 +30,7 @@ def load_favorites() -> List[Dict[str, Any]]:
 
 
 def save_favorites(items: List[Dict[str, Any]]) -> bool:
-    """Saves favorites list to JSON file."""
+    """Saves favorites list to local JSON file."""
     try:
         with open(FAVORITES_FILE, "w", encoding="utf-8") as f:
             json.dump(items, f, indent=2, ensure_ascii=False)
@@ -34,35 +40,17 @@ def save_favorites(items: List[Dict[str, Any]]) -> bool:
 
 
 def add_favorite(url: str, title: str, platform: str = "Web", name: str = "") -> bool:
-    """Adds a new URL to favorites."""
+    """Adds a new URL to favorites (TiDB Cloud + local fallback cache)."""
     if not url:
         return False
-
-    favs = load_favorites()
-    # Prevent duplicate URL entries
-    favs = [f for f in favs if f.get("url") != url]
-
-    new_item = {
-        "id": f"fav_{int(time.time()*1000)}",
-        "url": url,
-        "title": title or url,
-        "name": name or title or url,
-        "platform": platform or "Web",
-        "added_at": time.strftime("%Y-%m-%d %H:%M:%S"),
-        "timestamp": time.time(),
-    }
-
-    favs.insert(0, new_item)
-    return save_favorites(favs)
+    return CloudFavoritesRepository.add_favorite(url, title, platform, name)
 
 
 def remove_favorite(fav_id_or_url: str) -> bool:
-    """Removes a favorite entry by ID or URL."""
-    favs = load_favorites()
-    updated = [f for f in favs if f.get("id") != fav_id_or_url and f.get("url") != fav_id_or_url]
-    return save_favorites(updated)
+    """Removes a favorite entry by ID or URL from TiDB Cloud and local cache."""
+    return CloudFavoritesRepository.remove_favorite(fav_id_or_url)
 
 
 def clear_favorites() -> bool:
-    """Clears all saved favorites."""
-    return save_favorites([])
+    """Clears all saved favorites from TiDB Cloud and local cache."""
+    return CloudFavoritesRepository.clear_all()

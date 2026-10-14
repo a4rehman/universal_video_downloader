@@ -18,6 +18,7 @@ from src.favorites import load_favorites, add_favorite, remove_favorite, clear_f
 from src.settings import load_settings, save_settings
 from src.errors import map_exception_to_user_message
 from src.ui import inject_custom_css, render_hero, render_legal_notice
+from src.database import get_database_status, apply_migrations, sync_local_to_cloud, is_db_configured
 
 # --- Page Config ---
 st.set_page_config(
@@ -37,7 +38,8 @@ if "settings" not in st.session_state:
 if "queue_mgr" not in st.session_state:
     st.session_state.queue_mgr = QueueManager(
         max_concurrency=int(st.session_state.settings.get("max_concurrency", 3)),
-        cookies_browser=st.session_state.settings.get("cookies_browser")
+        cookies_browser=st.session_state.settings.get("cookies_browser"),
+        cookies_file=st.session_state.settings.get("cookies_file"),
     )
 
 if "analyzed_meta" not in st.session_state:
@@ -75,6 +77,17 @@ with st.sidebar:
         st.markdown(f"FFprobe: {'✅' if sys_status['ffprobe']['status'] else '❌'}")
         st.markdown(f"Network: {'⚡' if sys_status['network']['status'] else '⚠️'}")
 
+    db_info = sys_status.get("database", {})
+    db_state = db_info.get("status", "Not configured")
+    if db_state == "Connected":
+        st.markdown(f"DB: 🟢 **TiDB Cloud** (`{db_info.get('version', 1)}`)")
+    elif db_state == "Migration required":
+        st.markdown(f"DB: 🟡 **Migration Needed**")
+    elif db_state == "Connection failed":
+        st.markdown(f"DB: 🔴 **Local Fallback**")
+    else:
+        st.markdown(f"DB: ⚪ **Local Storage**")
+
     if not sys_status['ffmpeg']['status']:
         st.error(
             "FFmpeg is missing, so separate video-only and audio-only streams cannot be "
@@ -111,12 +124,32 @@ if nav_option == "Home":
         if not is_valid_url(input_url):
             st.error("❌ Invalid URL provided. Please paste a valid web link starting with http:// or https://")
         else:
+            # Check for Shorts/Reels only options
+            platform = detect_platform(input_url)
+            show_shorts_filter = platform == "YouTube"
+            show_reels_filter = platform.startswith("Instagram")
+            
+            shorts_only = False
+            reels_only = False
+            
+            if show_shorts_filter or show_reels_filter:
+                filter_col1, filter_col2 = st.columns(2)
+                with filter_col1:
+                    if show_shorts_filter:
+                        shorts_only = st.checkbox("📱 Shorts Only", value=False, help="Only discover YouTube Shorts from channel")
+                with filter_col2:
+                    if show_reels_filter:
+                        reels_only = st.checkbox("🎞️ Reels Only", value=False, help="Only discover Instagram Reels from profile")
+            
             with st.spinner("Analyzing media metadata..."):
                 try:
                     meta = extract_media_info(
                         input_url,
                         cookies_browser=st.session_state.settings.get("cookies_browser"),
                         playlist_limit=int(st.session_state.settings.get("playlist_limit", 0) or 0) or None,
+                        shorts_only=shorts_only,
+                        reels_only=reels_only,
+                        cookies_file=st.session_state.settings.get("cookies_file"),
                     )
                     st.session_state.analyzed_meta = meta
                     st.session_state.last_analyzed_url = input_url
@@ -327,6 +360,7 @@ if nav_option == "Home":
                         audio_quality=audio_quality,
                         options=adv_opts,
                         cookies_browser=st.session_state.settings.get("cookies_browser"),
+                        cookies_file=st.session_state.settings.get("cookies_file"),
                         progress_callback=home_progress_hook,
                     )
 
@@ -569,6 +603,11 @@ elif nav_option == "Settings":
         st.markdown("#### ⚡ Performance & Engine")
         d_conc = st.slider("Maximum Concurrent Downloads", min_value=1, max_value=5, value=int(settings.get("max_concurrency", 3)))
         d_browser = st.selectbox("Cookies Browser Source (fixes YouTube age/bot checks)", [None, "chrome", "firefox", "edge", "safari"], index=0)
+        d_cookies_file = st.text_input(
+            "Cookies File (cookies.txt — recommended for Instagram/Facebook)",
+            value=settings.get("cookies_file", ""),
+            help="Export cookies with a browser extension like 'Get cookies.txt LOCALLY' while logged in, then paste the file path here. Takes priority over the browser source.",
+        )
 
         st.divider()
         st.markdown("#### 🏷️ Metadata & Tagging")
@@ -583,13 +622,73 @@ elif nav_option == "Settings":
                 "default_quality": d_qual,
                 "max_concurrency": d_conc,
                 "cookies_browser": d_browser,
+                "cookies_file": d_cookies_file,
                 "embed_thumbnail": d_thumb,
                 "embed_metadata": d_meta,
             }
             save_settings(new_cfg)
             st.session_state.settings = load_settings()
             st.session_state.queue_mgr.set_concurrency(d_conc)
+            st.session_state.queue_mgr.set_cookies(
+                cookies_browser=d_browser,
+                cookies_file=d_cookies_file,
+            )
             st.success("✅ Settings updated successfully!")
+
+    st.markdown('<div class="omni-glass-card">', unsafe_allow_html=True)
+    st.markdown("#### ☁️ TiDB Cloud Serverless Database")
+    st.markdown("OmniStream syncs download history, favorites, and user preferences with TiDB Cloud Serverless.")
+
+    db_health = get_database_status()
+    st.markdown(f"**Status:** {db_health.get('label')}")
+    st.caption(f"{db_health.get('message')}")
+
+    col_db1, col_db2, col_db3 = st.columns(3)
+    with col_db1:
+        if st.button("🔄 Test Connection", use_container_width=True):
+            status = get_database_status()
+            if status.get("connected"):
+                st.success(f"Connected to TiDB! Schema version: v{status.get('version', 0)}")
+            else:
+                st.warning(f"Connection status: {status.get('label')} - {status.get('message')}")
+    with col_db2:
+        if st.button("⚡ Run Migrations", use_container_width=True):
+            ok, msg = apply_migrations()
+            if ok:
+                st.success(f"✅ {msg}")
+            else:
+                st.error(f"❌ {msg}")
+    with col_db3:
+        if st.button("📥 Sync Local to Cloud", use_container_width=True):
+            h_count, f_count = sync_local_to_cloud()
+            st.success(f"Synced {h_count} history records and {f_count} favorites to TiDB Cloud!")
+
+    with st.expander("📖 TiDB Cloud Setup Instructions"):
+        st.markdown("""
+        To connect OmniStream to your TiDB Cloud Serverless cluster, set the following environment variables (or Streamlit Secrets):
+        
+        **In `.env` or Environment Variables:**
+        ```bash
+        TIDB_HOST=gateway01.us-east-1.prod.aws.tidbcloud.com
+        TIDB_PORT=4000
+        TIDB_USER=your_user_prefix.root
+        TIDB_PASSWORD=your_secure_password
+        TIDB_DATABASE=omnistream
+        TIDB_SSL_MODE=REQUIRED
+        ```
+
+        **In Streamlit Community Cloud (`secrets.toml`):**
+        ```toml
+        [database]
+        host = "gateway01.us-east-1.prod.aws.tidbcloud.com"
+        port = 4000
+        user = "your_user_prefix.root"
+        password = "your_secure_password"
+        database = "omnistream"
+        ssl_mode = "REQUIRED"
+        ```
+        """)
+    st.markdown('</div>', unsafe_allow_html=True)
 
 
 # ==========================================

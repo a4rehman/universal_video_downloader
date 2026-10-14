@@ -99,6 +99,12 @@ def detect_platform(url: str) -> str:
         return "SoundCloud"
     if "reddit.com" in netloc or "redd.it" in netloc:
         return "Reddit"
+    if "dailymotion.com" in netloc:
+        return "Dailymotion"
+    if "linkedin.com" in netloc:
+        return "LinkedIn"
+    if "snapchat.com" in netloc or "snapchat.com/spotlight" in url.lower():
+        return "Snapchat"
     
     # Check direct image extensions
     path_lower = urlparse(url.strip()).path.lower()

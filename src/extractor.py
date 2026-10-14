@@ -12,6 +12,7 @@ from .formats import filter_available_resolutions
 from .media import MediaMetadata, PlaylistItem
 from .errors import InvalidURLError, ExtractorError
 from .system import resolve_js_runtime
+from .cookies import apply_cookie_opts, COOKIES_TXT_HELP
 
 
 # Player client fallback chains for YouTube. None = let yt-dlp choose its own
@@ -34,6 +35,41 @@ CHANNEL_URL_MARKERS = (
 # Instagram URL patterns that point at a collection (profile or reels listing)
 INSTAGRAM_COLLECTION_MARKERS = (
     "/reels/",
+)
+
+# Dailymotion collection markers
+DAILYMOTION_COLLECTION_MARKERS = (
+    "/user/", "/playlist/", "/channel/",
+)
+
+# Twitch collection markers
+TWITCH_COLLECTION_MARKERS = (
+    "/videos", "/clips", "/collections",
+)
+
+# LinkedIn collection markers
+LINKEDIN_COLLECTION_MARKERS = (
+    "/posts/", "/video/",
+)
+
+# Snapchat collection markers
+SNAPCHAT_COLLECTION_MARKERS = (
+    "/spotlight/", "/discover/",
+)
+
+# Facebook collection markers
+FACEBOOK_COLLECTION_MARKERS = (
+    "/videos/", "/reels/", "/watch/", "sk=reels_tab", "sk=reels", "sk=videos_tab", "sk=videos", "/videos", "/reels",
+)
+
+# SoundCloud collection markers
+SOUNDCLOUD_COLLECTION_MARKERS = (
+    "/sets/", "/tracks/", "/playlists/",
+)
+
+# Vimeo collection markers
+VIMEO_COLLECTION_MARKERS = (
+    "/channels/", "/groups/", "/albums/", "/showcases/",
 )
 
 # Desktop User Agent - exported for use by other modules
@@ -96,6 +132,41 @@ def looks_like_collection(url: str, platform: str) -> bool:
     if platform.startswith("Instagram"):
         return is_instagram_collection_url(url)
     
+    low = url.lower()
+    
+    if platform == "Dailymotion":
+        return any(m in low for m in DAILYMOTION_COLLECTION_MARKERS)
+    
+    if platform == "Twitch":
+        return any(m in low for m in TWITCH_COLLECTION_MARKERS)
+    
+    if platform == "LinkedIn":
+        return any(m in low for m in LINKEDIN_COLLECTION_MARKERS)
+    
+    if platform == "Snapchat":
+        return any(m in low for m in SNAPCHAT_COLLECTION_MARKERS)
+    
+    if platform == "Facebook":
+        return any(m in low for m in FACEBOOK_COLLECTION_MARKERS)
+    
+    if platform == "SoundCloud":
+        return any(m in low for m in SOUNDCLOUD_COLLECTION_MARKERS)
+    
+    if platform == "Vimeo":
+        return any(m in low for m in VIMEO_COLLECTION_MARKERS)
+    
+    if platform == "Pinterest":
+        # Pinterest boards and user profiles
+        return "/pin/" in low or "/board/" in low or "/user/" in low
+    
+    if platform == "TikTok":
+        # TikTok user profiles and hashtag pages
+        return "/@" in low and "/video/" not in low
+    
+    if platform == "Twitter / X":
+        # Twitter user timelines and lists
+        return "/status/" not in low and ("/lists/" in low or "/i/lists/" in low or re.match(r"https?://(?:www\.)?(?:twitter\.com|x\.com)/[^/?#]+/?$", low))
+    
     return False
 
 
@@ -127,6 +198,8 @@ def _build_ydl_opts(
     client_chain: Optional[List[str]],
     playlist_limit: Optional[int],
     cookies_browser: Optional[str],
+    playlist_start: Optional[int] = None,
+    cookies_file: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Builds yt-dlp options for a flat metadata probe."""
     ydl_opts: Dict[str, Any] = {
@@ -173,8 +246,10 @@ def _build_ydl_opts(
     if playlist_limit and playlist_limit > 0:
         ydl_opts['playlistend'] = playlist_limit
 
-    if cookies_browser:
-        ydl_opts['cookiesfrombrowser'] = (cookies_browser,)
+    if playlist_start and playlist_start > 1:
+        ydl_opts['playliststart'] = playlist_start
+
+    apply_cookie_opts(ydl_opts, cookies_browser, cookies_file)
 
     return ydl_opts
 
@@ -208,6 +283,8 @@ def _extract_channel_tabs(
     tab_urls: List[str],
     playlist_limit: Optional[int],
     cookies_browser: Optional[str],
+    shorts_only: bool = False,
+    cookies_file: Optional[str] = None,
 ) -> Optional[MediaMetadata]:
     """
     Extracts every content tab of a channel and merges them into one result.
@@ -216,6 +293,12 @@ def _extract_channel_tabs(
     None only when no tab at all could be listed, so the caller can fall back to
     a single-URL extraction.
     """
+    # Filter tabs based on shorts_only flag
+    if shorts_only:
+        tab_urls = [u for u in tab_urls if u.endswith("/shorts")]
+        if not tab_urls:
+            return None
+    
     last_err = None
 
     for client_chain in YOUTUBE_CLIENT_CHAINS:
@@ -225,7 +308,8 @@ def _extract_channel_tabs(
 
         for tab_url in tab_urls:
             ydl_opts = _build_ydl_opts(
-                tab_url, "YouTube", client_chain, playlist_limit, cookies_browser
+                tab_url, "YouTube", client_chain, playlist_limit, cookies_browser,
+                playlist_start=None, cookies_file=cookies_file,
             )
             try:
                 with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -292,6 +376,7 @@ def _build_instagram_ydl_opts(
     url: str,
     playlist_limit: Optional[int],
     cookies_browser: Optional[str],
+    cookies_file: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Builds yt-dlp options for Instagram metadata extraction."""
     ydl_opts: Dict[str, Any] = {
@@ -310,8 +395,7 @@ def _build_instagram_ydl_opts(
     if playlist_limit and playlist_limit > 0:
         ydl_opts['playlistend'] = playlist_limit
 
-    if cookies_browser:
-        ydl_opts['cookiesfrombrowser'] = (cookies_browser,)
+    apply_cookie_opts(ydl_opts, cookies_browser, cookies_file)
 
     return ydl_opts
 
@@ -320,6 +404,8 @@ def _extract_instagram_reels(
     url: str,
     playlist_limit: Optional[int],
     cookies_browser: Optional[str],
+    reels_only: bool = False,
+    cookies_file: Optional[str] = None,
 ) -> Optional[MediaMetadata]:
     """
     Extracts Reels from an Instagram profile or Reels listing URL.
@@ -331,6 +417,15 @@ def _extract_instagram_reels(
     Note: Instagram often requires authentication. Provide cookies_browser
     (e.g., "chrome", "firefox", "edge") for private or restricted profiles.
     """
+    # If reels_only is True but URL is not a reels listing, convert it
+    if reels_only and "/reels/" not in url:
+        # Convert profile URL to reels listing URL
+        import re
+        match = re.search(r"instagram\.com/([^/?#]+)/?$", url)
+        if match:
+            username = match.group(1)
+            url = f"https://www.instagram.com/{username}/reels/"
+    
     # Convert /reels/ listing URL to profile URL for yt-dlp compatibility
     # yt-dlp's instagram extractor supports profile URLs but not /reels/ listings
     extraction_url = url
@@ -342,7 +437,9 @@ def _extract_instagram_reels(
             username = match.group(1)
             extraction_url = f"https://www.instagram.com/{username}/"
     
-    ydl_opts = _build_instagram_ydl_opts(extraction_url, playlist_limit, cookies_browser)
+    ydl_opts = _build_instagram_ydl_opts(
+        extraction_url, playlist_limit, cookies_browser, cookies_file
+    )
     
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -351,10 +448,11 @@ def _extract_instagram_reels(
         # Provide actionable error message for common Instagram issues
         err_str = str(e).lower()
         if "unable to extract data" in err_str or "unsupported url" in err_str:
-            if not cookies_browser:
+            if not cookies_browser and not cookies_file:
                 raise ExtractorError(
                     "Instagram requires authentication to access this profile. "
-                    "Please set browser cookies in Settings (close browser first) and retry.",
+                    "Set a cookies.txt file in Settings → Cookies File (export it with a "
+                    "browser extension while logged in), or set browser cookies and retry.",
                     details=str(e)
                 )
             else:
@@ -456,6 +554,9 @@ def extract_media_info(
     url: str,
     cookies_browser: Optional[str] = None,
     playlist_limit: Optional[int] = None,
+    shorts_only: bool = False,
+    reels_only: bool = False,
+    cookies_file: Optional[str] = None,
 ) -> MediaMetadata:
     """
     Analyzes a media URL and returns a structured MediaMetadata object.
@@ -484,7 +585,9 @@ def extract_media_info(
 
     # Handle Instagram profile/reels listing URLs
     if platform.startswith("Instagram") and is_collection:
-        merged = _extract_instagram_reels(url, playlist_limit, cookies_browser)
+        merged = _extract_instagram_reels(
+            url, playlist_limit, cookies_browser, reels_only, cookies_file
+        )
         if merged is not None:
             return merged
         # If extraction returns None, fall through to single-item extraction
@@ -493,7 +596,9 @@ def extract_media_info(
     # Enumerate every tab so "download everything on this channel" really does.
     tab_urls = channel_tab_urls(url) if platform == "YouTube" else []
     if tab_urls:
-        merged = _extract_channel_tabs(url, tab_urls, playlist_limit, cookies_browser)
+        merged = _extract_channel_tabs(
+            url, tab_urls, playlist_limit, cookies_browser, shorts_only, cookies_file
+        )
         if merged is not None:
             return merged
 
@@ -507,7 +612,8 @@ def extract_media_info(
 
     for client_chain in client_chains:
         ydl_opts = _build_ydl_opts(
-            url, platform, client_chain, playlist_limit, cookies_browser
+            url, platform, client_chain, playlist_limit, cookies_browser,
+            playlist_start=None, cookies_file=cookies_file,
         )
 
         try:
@@ -600,8 +706,26 @@ def _friendly_error(err: Any, url: str) -> str:
             "(close the browser first) and try again."
         )
 
-    if "sign in to confirm" in raw or "not a bot" in raw:
-        return "YouTube asked for a bot check. Set browser cookies in Settings and retry."
+    if "could not copy" in raw and "cookie" in raw:
+        return (
+            "Could not read browser cookies because your browser is currently running and locking its cookie database. "
+            "Please close your browser completely (check Task Manager or system tray to ensure no background processes remain), then try again. "
+            + COOKIES_TXT_HELP
+        )
+
+    if "facebook.com/login" in raw or ("facebook" in raw and ("login" in raw or "unsupported url" in raw)):
+        return (
+            "Facebook requires an active login session to view this profile or Reels listing. "
+            "Facebook redirected to its login page. Set browser cookies in Settings "
+            "(ensure your browser is closed first so cookies can be read) and try again."
+        )
+
+    if "not a bot" in raw or "confirm you" in raw and "bot" in raw:
+        return (
+            "YouTube bot check triggered. Your IP may be flagged by YouTube's anti-automation. "
+            "Set browser cookies in Settings (close your browser first) to bypass this, "
+            "or try again from a different network."
+        )
 
     if "unsupported url" in raw or "no suitable extractor" in raw:
         return f"No downloader is available for '{url}'."

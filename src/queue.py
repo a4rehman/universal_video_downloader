@@ -18,9 +18,11 @@ class QueueManager:
     """
     Thread-safe Queue Manager governing media download tasks.
     """
-    def __init__(self, max_concurrency: int = 3, cookies_browser: Optional[str] = None):
+    def __init__(self, max_concurrency: int = 3, cookies_browser: Optional[str] = None,
+                 cookies_file: Optional[str] = None):
         self.max_concurrency = max_concurrency
         self.cookies_browser = cookies_browser
+        self.cookies_file = cookies_file
         self.jobs: Dict[str, DownloadJob] = {}
         self.lock = threading.Lock()
         self.cancel_events: Dict[str, threading.Event] = {}
@@ -30,6 +32,13 @@ class QueueManager:
     def set_concurrency(self, max_concurrency: int):
         with self.lock:
             self.max_concurrency = max_concurrency
+
+    def set_cookies(self, cookies_browser: Optional[str] = None,
+                    cookies_file: Optional[str] = None):
+        """Updates the cookie sources used by subsequently started jobs."""
+        with self.lock:
+            self.cookies_browser = cookies_browser
+            self.cookies_file = cookies_file
 
     def add_listener(self, callback: Callable[[DownloadJob], None]):
         self.listeners.append(callback)
@@ -172,6 +181,7 @@ class QueueManager:
                 audio_quality=job.audio_quality,
                 options=job.options,
                 cookies_browser=self.cookies_browser,
+                cookies_file=self.cookies_file,
                 progress_callback=progress_hook,
                 cancel_event=cancel_evt,
             )

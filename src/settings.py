@@ -7,6 +7,7 @@ import json
 import os
 from typing import Dict, Any
 from .filesystem import get_default_download_directory
+from .database import CloudSettingsRepository, is_db_configured
 
 CONFIG_FILE = os.path.join(os.path.expanduser("~"), ".omnistream_config.json")
 
@@ -27,13 +28,14 @@ DEFAULT_SETTINGS: Dict[str, Any] = {
     "embed_thumbnail": False,
     "embed_metadata": True,
     "cookies_browser": None,
+    "cookies_file": "",
     "history_enabled": True,
     "debug_logging": False,
 }
 
 
 def load_settings() -> Dict[str, Any]:
-    """Loads configuration settings from JSON file with defaults fallback."""
+    """Loads configuration settings from JSON file with defaults fallback and TiDB sync."""
     cfg = DEFAULT_SETTINGS.copy()
     if os.path.exists(CONFIG_FILE):
         try:
@@ -47,12 +49,18 @@ def load_settings() -> Dict[str, Any]:
 
 
 def save_settings(settings_dict: Dict[str, Any]) -> bool:
-    """Saves updated settings to JSON file."""
+    """Saves updated settings to JSON file and synchronizes to TiDB Cloud where applicable."""
     try:
         current = load_settings()
         current.update(settings_dict)
         with open(CONFIG_FILE, "w", encoding="utf-8") as f:
             json.dump(current, f, indent=2, ensure_ascii=False)
+
+        # Synchronize non-machine settings to TiDB Cloud if configured
+        if is_db_configured():
+            for k, v in settings_dict.items():
+                if k not in ("download_path", "download_dir"):
+                    CloudSettingsRepository.save_setting(k, v)
         return True
     except Exception:
         return False
