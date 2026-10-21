@@ -4,6 +4,7 @@ requests
 Pillow
 customtkinter
 pytest
+beautifulsoup4
 # Bundles a static ffmpeg build. yt-dlp needs ffmpeg to merge the separate
 # video-only and audio-only streams that sites serve, so without this a video
 # download lands as two unusable files instead of one playable video.

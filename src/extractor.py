@@ -13,6 +13,7 @@ from .media import MediaMetadata, PlaylistItem
 from .errors import InvalidURLError, ExtractorError
 from .system import resolve_js_runtime
 from .cookies import apply_cookie_opts, COOKIES_TXT_HELP
+from .instagram_scraper import InstagramReelsScraper, extract_instagram_reels_from_profile
 
 
 # Player client fallback chains for YouTube. None = let yt-dlp choose its own
@@ -552,11 +553,9 @@ def _extract_instagram_reels(
 
 def extract_media_info(
     url: str,
-    cookies_browser: Optional[str] = None,
     playlist_limit: Optional[int] = None,
     shorts_only: bool = False,
     reels_only: bool = False,
-    cookies_file: Optional[str] = None,
 ) -> MediaMetadata:
     """
     Analyzes a media URL and returns a structured MediaMetadata object.
@@ -585,13 +584,100 @@ def extract_media_info(
 
     # Handle Instagram profile/reels listing URLs
     if platform.startswith("Instagram") and is_collection:
-        merged = _extract_instagram_reels(
-            url, playlist_limit, cookies_browser, reels_only, cookies_file
-        )
+        # First try the yt-dlp-based extractor (may raise ExtractorError on auth failure)
+        merged = None
+        try:
+            merged = _extract_instagram_reels(
+                url, playlist_limit, reels_only
+            )
+        except Exception:
+            # yt-dlp's Instagram extractor often fails (auth required, broken extractor).
+            # Fall through to the InstagramReelsScraper fallback below.
+            pass
+
+        # If the yt-dlp extractor succeeded, return it immediately.
         if merged is not None:
             return merged
-        # If extraction returns None, fall through to single-item extraction
 
+        # Fallback: use InstagramReelsScraper when yt-dlp's extractor returns None
+        # or raises an exception. The scraper uses HTML parsing with cookies
+        # (cookies.txt preferred, browser best-effort) and can succeed even when
+        # yt-dlp's extractor fails (auth issues, broken extractor).
+        try:
+            from src.instagram_scraper import InstagramReelsScraper
+            scraper = InstagramReelsScraper()
+            # Use playlist_limit if configured, otherwise discover all accessible Reels
+            # (no arbitrary 50-item cap). When a limit is set, mark results accordingly.
+            max_reels = playlist_limit
+            reel_urls = scraper.extract_reel_urls(url, max_reels=max_reels)
+            if reel_urls:
+                # Build MediaMetadata from the scraper results
+                title = url.split("/")[-2] if "/reels/" in url else "Instagram Profile"
+                thumbnail = None
+                uploader = None
+
+                base = MediaMetadata(
+                    url=url,
+                    title=title,
+                    thumbnail=thumbnail,
+                    uploader=uploader,
+                    platform="Instagram",
+                    is_playlist=True,
+                    playlist_title="Instagram Reels",
+                )
+
+                playlist_items = []
+                seen_urls = set()
+                truncated = False
+                for idx, reel_url in enumerate(reel_urls, 1):
+                    if reel_url in seen_urls:
+                        continue
+                    seen_urls.add(reel_url)
+                    # Check if we've hit a user-configured limit
+                    if max_reels is not None and idx > max_reels:
+                        truncated = True
+                        continue
+                    playlist_items.append(PlaylistItem(
+                        url=reel_url,
+                        title=reel_url.split("/")[-1] or "Reel " + str(idx),
+                        index=idx,
+                        selected=True,
+                    ))
+
+                if playlist_items:
+                    base.playlist_items = playlist_items
+                    base.playlist_count = len(playlist_items)
+                    # Indicate if results were truncated by a user limit
+                    if truncated:
+                        base.playlist_title = "Instagram Reels ({} discovered of ~{}+)".format(
+                            len(playlist_items), max_reels
+                        )
+                    else:
+                        base.playlist_title = "Instagram Reels ({})".format(
+                            len(playlist_items)
+                        )
+                    return base
+        except Exception:
+            # If scraper fails for any reason (no cookies, extraction error),
+            # fall through to single-item extraction rather than crashing.
+            pass
+
+        # If we're dealing with an Instagram collection and haven't found any Reels,
+        # return empty playlist metadata instead of falling through to generic
+        # extraction (which would treat the profile URL as a single video).
+        if platform.startswith("Instagram") and is_collection:
+            from .media import MediaMetadata
+            return MediaMetadata(
+                url=url,
+                title=url.split("/")[-2] if "/reels/" in url else "Instagram Profile",
+                thumbnail=None,
+                uploader=None,
+                platform="Instagram",
+                is_playlist=True,
+                playlist_title="Instagram Reels",
+                playlist_items=[],
+                playlist_count=0,
+            )
     # A bare channel handle only exposes its default tab, which hides Shorts.
     # Enumerate every tab so "download everything on this channel" really does.
     tab_urls = channel_tab_urls(url) if platform == "YouTube" else []
@@ -713,11 +799,34 @@ def _friendly_error(err: Any, url: str) -> str:
             + COOKIES_TXT_HELP
         )
 
-    if "facebook.com/login" in raw or ("facebook" in raw and ("login" in raw or "unsupported url" in raw)):
+    if (
+        "facebook.com/login" in raw
+        or (
+            "facebook" in raw
+            and (
+                "login" in raw
+                or "unsupported url" in raw
+                # yt-dlp's Facebook extractor fails to parse most Reels/watch
+                # pages without an authenticated session.
+                or "cannot parse data" in raw
+            )
+        )
+    ):
         return (
-            "Facebook requires an active login session to view this profile or Reels listing. "
-            "Facebook redirected to its login page. Set browser cookies in Settings "
-            "(ensure your browser is closed first so cookies can be read) and try again."
+            "Facebook requires an active login session to view this video, profile, or Reels listing. "
+            "Either Facebook redirected to its login page, or its page format could not be parsed "
+            "without being signed in. Set a cookies.txt file in Settings (export it with a browser "
+            "extension while logged into Facebook) and try again. " + COOKIES_TXT_HELP
+        )
+
+    # TikTok blocks profile/hashtag listings without a logged-in session.
+    if "tiktok" in raw and (
+        "secondary user id" in raw or "ip address is blocked" in raw or "login" in raw
+    ):
+        return (
+            "TikTok blocked this profile or video without a logged-in session. "
+            "Set a cookies.txt file in Settings (export it with a browser extension while "
+            "logged into TikTok) and try again. " + COOKIES_TXT_HELP
         )
 
     if "not a bot" in raw or "confirm you" in raw and "bot" in raw:
@@ -739,12 +848,22 @@ def _friendly_error(err: Any, url: str) -> str:
     # Instagram-specific errors
     if "instagram" in raw:
         if "login required" in raw or "please log in" in raw or "sign in to view" in raw:
-            return "This Instagram content requires login. Set browser cookies in Settings (close browser first) and retry."
+            return (
+                "This Instagram content requires login. Set a cookies.txt file in Settings "
+                "(export it with a browser extension while logged into Instagram) and retry. "
+                + COOKIES_TXT_HELP
+            )
         if "rate limit" in raw or "too many requests" in raw or "429" in raw:
             return "Instagram rate limit reached. Wait a few minutes and try again."
-        if "this account is private" in raw or "private account" in raw:
-            return "This Instagram account is private. You need to follow the account and use browser cookies to access."
         if "not found" in raw or "404" in raw:
             return "Instagram content not found. It may have been deleted or the URL is incorrect."
+
+    # Checked outside the "instagram" guard because yt-dlp's private-account
+    # message often omits the site name entirely.
+    if "this account is private" in raw or "private account" in raw:
+        return (
+            "This account is private. You need to follow the account, then use a "
+            "logged-in cookies.txt file in Settings to access its posts. " + COOKIES_TXT_HELP
+        )
 
     return f"Extraction failed: {str(err) or 'yt-dlp returned empty metadata for this link.'}"

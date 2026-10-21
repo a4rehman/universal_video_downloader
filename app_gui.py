@@ -956,30 +956,7 @@ class DownloadApp(ctk.CTk):
         self.accent_menu.set(self.config.get("accent", "Violet"))
         self.accent_menu.pack(side="left", padx=12)
 
-        # Cookies
-        c4 = self.make_card(page, "🍪 Cookies (fixes YouTube bot-block)")
-        inner4 = ctk.CTkFrame(c4, fg_color="transparent")
-        inner4.pack(fill="x", padx=18, pady=(10, 6))
-        ctk.CTkLabel(inner4, text="Use cookies from browser:", font=("Inter", 12),
-                     text_color="#94a3b8").pack(side="left")
-        self.browser_menu = ctk.CTkOptionMenu(inner4, values=["", "chrome", "edge", "firefox", "brave"],
-                                              width=120, height=34, font=("Inter", 12),
-                                              command=self.on_browser_change)
-        self.browser_menu.set(self.config.get("cookies_browser", ""))
-        self.browser_menu.pack(side="left", padx=12)
-
-        # Cookies.txt file (recommended for Instagram/Facebook; bypasses App-Bound Encryption)
-        inner4b = ctk.CTkFrame(c4, fg_color="transparent")
-        inner4b.pack(fill="x", padx=18, pady=(0, 10))
-        ctk.CTkLabel(inner4b, text="Cookies file (cookies.txt):", font=("Inter", 12),
-                     text_color="#94a3b8").pack(side="left")
-        self.cookies_file_var = ctk.StringVar(value=self.config.get("cookies_file", ""))
-        self.cookies_file_entry = ctk.CTkEntry(inner4b, textvariable=self.cookies_file_var,
-                                               width=380, height=34, font=("Inter", 12),
-                                               placeholder_text="Path to exported cookies.txt (optional)")
-        self.cookies_file_entry.pack(side="left", padx=12)
-        self.cookies_file_entry.bind("<FocusOut>", lambda e: self.on_cookies_file_change())
-        self.cookies_file_entry.bind("<Return>", lambda e: self.on_cookies_file_change())
+        # No cookie configuration needed\n\nOmniStream works without cookie configuration for supported platforms.\n\nst.divider()\n>", lambda e: self.on_cookies_file_change())
         # TiDB Cloud Database Status & Sync Card
         c_db = self.make_card(page, "☁️ Cloud Database (TiDB Cloud Serverless)")
         inner_db = ctk.CTkFrame(c_db, fg_color="transparent")

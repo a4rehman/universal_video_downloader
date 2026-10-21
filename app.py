@@ -38,8 +38,6 @@ if "settings" not in st.session_state:
 if "queue_mgr" not in st.session_state:
     st.session_state.queue_mgr = QueueManager(
         max_concurrency=int(st.session_state.settings.get("max_concurrency", 3)),
-        cookies_browser=st.session_state.settings.get("cookies_browser"),
-        cookies_file=st.session_state.settings.get("cookies_file"),
     )
 
 if "analyzed_meta" not in st.session_state:
@@ -145,11 +143,9 @@ if nav_option == "Home":
                 try:
                     meta = extract_media_info(
                         input_url,
-                        cookies_browser=st.session_state.settings.get("cookies_browser"),
                         playlist_limit=int(st.session_state.settings.get("playlist_limit", 0) or 0) or None,
                         shorts_only=shorts_only,
                         reels_only=reels_only,
-                        cookies_file=st.session_state.settings.get("cookies_file"),
                     )
                     st.session_state.analyzed_meta = meta
                     st.session_state.last_analyzed_url = input_url
@@ -359,8 +355,6 @@ if nav_option == "Home":
                         audio_codec=audio_codec,
                         audio_quality=audio_quality,
                         options=adv_opts,
-                        cookies_browser=st.session_state.settings.get("cookies_browser"),
-                        cookies_file=st.session_state.settings.get("cookies_file"),
                         progress_callback=home_progress_hook,
                     )
 
@@ -602,13 +596,7 @@ elif nav_option == "Settings":
         st.divider()
         st.markdown("#### ⚡ Performance & Engine")
         d_conc = st.slider("Maximum Concurrent Downloads", min_value=1, max_value=5, value=int(settings.get("max_concurrency", 3)))
-        d_browser = st.selectbox("Cookies Browser Source (fixes YouTube age/bot checks)", [None, "chrome", "firefox", "edge", "safari"], index=0)
-        d_cookies_file = st.text_input(
-            "Cookies File (cookies.txt — recommended for Instagram/Facebook)",
-            value=settings.get("cookies_file", ""),
-            help="Export cookies with a browser extension like 'Get cookies.txt LOCALLY' while logged in, then paste the file path here. Takes priority over the browser source.",
-        )
-
+        st.divider()
         st.divider()
         st.markdown("#### 🏷️ Metadata & Tagging")
         d_thumb = st.checkbox("Embed Thumbnails by default", value=settings.get("embed_thumbnail", True))
@@ -621,8 +609,6 @@ elif nav_option == "Settings":
                 "default_media_type": d_media,
                 "default_quality": d_qual,
                 "max_concurrency": d_conc,
-                "cookies_browser": d_browser,
-                "cookies_file": d_cookies_file,
                 "embed_thumbnail": d_thumb,
                 "embed_metadata": d_meta,
             }

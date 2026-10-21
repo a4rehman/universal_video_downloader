@@ -143,23 +143,6 @@ PLATFORM_CAPABILITIES: Dict[str, Dict[PlatformCapability, PlatformCapabilityInfo
             notes="User timeline and lists",
         ),
     },
-    "TikTok": {
-        PlatformCapability.SINGLE_VIDEO: PlatformCapabilityInfo(
-            capability=PlatformCapability.SINGLE_VIDEO,
-            support_level=SupportLevel.FULL,
-            quality_options=["Best Available"],
-            audio_only=True,
-        ),
-        PlatformCapability.CHANNEL_PROFILE: PlatformCapabilityInfo(
-            capability=PlatformCapability.CHANNEL_PROFILE,
-            support_level=SupportLevel.PARTIAL,
-            notes="User profile videos",
-        ),
-        PlatformCapability.USER_COLLECTION: PlatformCapabilityInfo(
-            capability=PlatformCapability.USER_COLLECTION,
-            support_level=SupportLevel.PARTIAL,
-        ),
-    },
     "Dailymotion": {
         PlatformCapability.SINGLE_VIDEO: PlatformCapabilityInfo(
             capability=PlatformCapability.SINGLE_VIDEO,
@@ -221,26 +204,6 @@ PLATFORM_CAPABILITIES: Dict[str, Dict[PlatformCapability, PlatformCapabilityInfo
             support_level=SupportLevel.LIMITED,
         ),
     },
-    "Dailymotion": {
-        PlatformCapability.SINGLE_VIDEO: PlatformCapabilityInfo(
-            capability=PlatformCapability.SINGLE_VIDEO,
-            support_level=SupportLevel.FULL,
-            quality_options=["Best Available", "1080p", "720p", "480p"],
-            audio_only=True,
-        ),
-        PlatformCapability.CHANNEL_PROFILE: PlatformCapabilityInfo(
-            capability=PlatformCapability.CHANNEL_PROFILE,
-            support_level=SupportLevel.PARTIAL,
-        ),
-        PlatformCapability.PLAYLIST: PlatformCapabilityInfo(
-            capability=PlatformCapability.PLAYLIST,
-            support_level=SupportLevel.FULL,
-        ),
-        PlatformCapability.USER_COLLECTION: PlatformCapabilityInfo(
-            capability=PlatformCapability.USER_COLLECTION,
-            support_level=SupportLevel.PARTIAL,
-        ),
-    },
     "Vimeo": {
         PlatformCapability.SINGLE_VIDEO: PlatformCapabilityInfo(
             capability=PlatformCapability.SINGLE_VIDEO,
@@ -292,39 +255,6 @@ PLATFORM_CAPABILITIES: Dict[str, Dict[PlatformCapability, PlatformCapabilityInfo
             capability=PlatformCapability.USER_COLLECTION,
             support_level=SupportLevel.LIMITED,
             notes="Boards and user profiles",
-        ),
-    },
-    "SoundCloud": {
-        PlatformCapability.SINGLE_VIDEO: PlatformCapabilityInfo(
-            capability=PlatformCapability.SINGLE_VIDEO,
-            support_level=SupportLevel.FULL,
-            notes="Audio tracks",
-            audio_only=True,
-        ),
-        PlatformCapability.PLAYLIST: PlatformCapabilityInfo(
-            capability=PlatformCapability.PLAYLIST,
-            support_level=SupportLevel.FULL,
-        ),
-        PlatformCapability.USER_COLLECTION: PlatformCapabilityInfo(
-            capability=PlatformCapability.USER_COLLECTION,
-            support_level=SupportLevel.FULL,
-        ),
-    },
-    "Vimeo": {
-        PlatformCapability.SINGLE_VIDEO: PlatformCapabilityInfo(
-            capability=PlatformCapability.SINGLE_VIDEO,
-            support_level=SupportLevel.FULL,
-            quality_options=["Best Available", "1080p", "720p", "480p"],
-            audio_only=True,
-        ),
-        PlatformCapability.CHANNEL_PROFILE: PlatformCapabilityInfo(
-            capability=PlatformCapability.CHANNEL_PROFILE,
-            support_level=SupportLevel.PARTIAL,
-            notes="Channels, Groups, Albums, Showcases",
-        ),
-        PlatformCapability.PLAYLIST: PlatformCapabilityInfo(
-            capability=PlatformCapability.PLAYLIST,
-            support_level=SupportLevel.FULL,
         ),
     },
     "Direct Image": {

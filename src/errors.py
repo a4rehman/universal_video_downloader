@@ -159,12 +159,35 @@ def map_exception_to_user_message(err: Exception) -> Dict[str, Any]:
             "technical_details": tech,
         }
 
-    if "facebook.com/login" in raw_lower or ("facebook" in raw_lower and ("login" in raw_lower or "unsupported url" in raw_lower)):
+    if (
+        "facebook.com/login" in raw_lower
+        or (
+            "facebook" in raw_lower
+            and (
+                "login" in raw_lower
+                or "unsupported url" in raw_lower
+                # yt-dlp's Facebook extractor fails to parse most Reels/watch
+                # pages without an authenticated session.
+                or "cannot parse data" in raw_lower
+            )
+        )
+    ):
         return {
             "category": ErrorCategory.PERMISSION_ERROR,
             "title": "Facebook Login Required",
-            "user_message": "Facebook redirected to login. This profile or Reels listing requires an active Facebook session.",
-            "tip": "Close Chrome completely so cookies can be accessed, or select browser cookies in Settings, or use direct public video URLs.",
+            "user_message": "Facebook requires an active sign-in to view this video, profile, or Reels listing.",
+            "tip": "Set a cookies.txt file in Settings (export it with a browser extension while logged into Facebook).",
+            "technical_details": tech,
+        }
+
+    if "tiktok" in raw_lower and (
+        "secondary user id" in raw_lower or "ip address is blocked" in raw_lower or "login" in raw_lower
+    ):
+        return {
+            "category": ErrorCategory.PERMISSION_ERROR,
+            "title": "TikTok Login Required",
+            "user_message": "TikTok blocked this profile or video without a logged-in session.",
+            "tip": "Set a cookies.txt file in Settings (export it with a browser extension while logged into TikTok).",
             "technical_details": tech,
         }
 
