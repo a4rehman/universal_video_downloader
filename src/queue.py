@@ -63,23 +63,34 @@ class QueueManager:
         thumbnail: Optional[str] = None,
         platform: str = "Web"
     ) -> DownloadJob:
+        from .validators import is_instagram_collection_url
+        if is_instagram_collection_url(url):
+            raise ValueError(
+                "Cannot add an Instagram collection (profile or reels listing) directly to the download queue. "
+                "Analyze the collection and queue individual Reel URLs instead."
+            )
+
         output_dir = output_dir or get_default_download_directory()
 
-        job = DownloadJob(
-            url=url,
-            title=title,
-            media_type=media_type,
-            quality_key=quality_key,
-            audio_codec=audio_codec,
-            audio_quality=audio_quality,
-            output_dir=output_dir,
-            status=JobStatus.QUEUED,
-            thumbnail=thumbnail,
-            platform=platform,
-            options=options or AdvancedOptions(),
-        )
-
         with self.lock:
+            # Check for existing active job for the exact same URL to prevent duplicates
+            for existing_job in self.jobs.values():
+                if existing_job.url == url and existing_job.status in (JobStatus.QUEUED, JobStatus.DOWNLOADING, JobStatus.PROCESSING):
+                    return existing_job
+
+            job = DownloadJob(
+                url=url,
+                title=title,
+                media_type=media_type,
+                quality_key=quality_key,
+                audio_codec=audio_codec,
+                audio_quality=audio_quality,
+                output_dir=output_dir,
+                status=JobStatus.QUEUED,
+                thumbnail=thumbnail,
+                platform=platform,
+                options=options or AdvancedOptions(),
+            )
             self.jobs[job.job_id] = job
             self.cancel_events[job.job_id] = threading.Event()
 
@@ -107,40 +118,42 @@ class QueueManager:
         """
         output_dir = output_dir or get_default_download_directory()
 
-        entries = [p for p in (meta.playlist_items or []) if getattr(p, "selected", True)]
+        if meta.is_playlist:
+            entries = [p for p in (meta.playlist_items or []) if getattr(p, "selected", True)]
+            if not entries:
+                return []
+            if limit and limit > 0:
+                entries = entries[:limit]
 
-        if not entries:
-            return [self.add_job(
-                url=meta.url,
-                title=meta.title,
-                media_type=media_type,
-                quality_key=quality_key,
-                audio_codec=audio_codec,
-                audio_quality=audio_quality,
-                output_dir=output_dir,
-                options=options,
-                thumbnail=meta.thumbnail,
-                platform=meta.platform,
-            )]
+            return [
+                self.add_job(
+                    url=entry.url,
+                    title=entry.title,
+                    media_type=media_type,
+                    quality_key=quality_key,
+                    audio_codec=audio_codec,
+                    audio_quality=audio_quality,
+                    output_dir=output_dir,
+                    options=options,
+                    thumbnail=entry.thumbnail or meta.thumbnail,
+                    platform=meta.platform,
+                )
+                for entry in entries
+            ]
 
-        if limit and limit > 0:
-            entries = entries[:limit]
-
-        return [
-            self.add_job(
-                url=entry.url,
-                title=entry.title,
-                media_type=media_type,
-                quality_key=quality_key,
-                audio_codec=audio_codec,
-                audio_quality=audio_quality,
-                output_dir=output_dir,
-                options=options,
-                thumbnail=entry.thumbnail or meta.thumbnail,
-                platform=meta.platform,
-            )
-            for entry in entries
-        ]
+        # Single media item
+        return [self.add_job(
+            url=meta.url,
+            title=meta.title,
+            media_type=media_type,
+            quality_key=quality_key,
+            audio_codec=audio_codec,
+            audio_quality=audio_quality,
+            output_dir=output_dir,
+            options=options,
+            thumbnail=meta.thumbnail,
+            platform=meta.platform,
+        )]
 
     def _run_job(self, job: DownloadJob):
         with self.lock:

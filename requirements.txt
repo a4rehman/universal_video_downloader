@@ -2,7 +2,6 @@ streamlit
 yt-dlp[default]>=2026.08
 requests
 Pillow
-customtkinter
 pytest
 beautifulsoup4
 # Bundles a static ffmpeg build. yt-dlp needs ffmpeg to merge the separate
@@ -12,3 +11,5 @@ imageio-ffmpeg>=0.4.9
 # TiDB Cloud Serverless (MySQL-compatible) connection driver & TLS support
 pymysql>=1.1.0
 cryptography>=42.0.0
+# Headless browser engine for JavaScript-rendered public social media profiles (e.g. Instagram Reels)
+playwright>=1.40.0

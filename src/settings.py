@@ -45,6 +45,8 @@ def load_settings() -> Dict[str, Any]:
                     cfg.update(saved)
         except Exception:
             pass
+    if "cookies_file" in cfg and isinstance(cfg["cookies_file"], str):
+        cfg["cookies_file"] = cfg["cookies_file"].strip().strip("'\"").strip()
     return cfg
 
 
@@ -52,7 +54,10 @@ def save_settings(settings_dict: Dict[str, Any]) -> bool:
     """Saves updated settings to JSON file and synchronizes to TiDB Cloud where applicable."""
     try:
         current = load_settings()
-        current.update(settings_dict)
+        cleaned = dict(settings_dict)
+        if "cookies_file" in cleaned and isinstance(cleaned["cookies_file"], str):
+            cleaned["cookies_file"] = cleaned["cookies_file"].strip().strip("'\"").strip()
+        current.update(cleaned)
         with open(CONFIG_FILE, "w", encoding="utf-8") as f:
             json.dump(current, f, indent=2, ensure_ascii=False)
 

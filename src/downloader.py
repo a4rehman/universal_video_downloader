@@ -20,6 +20,7 @@ YOUTUBE_CLIENT_CHAINS = [
     ['visionos', 'web_embedded'],
     ['android_vr', 'tv', 'web_safari'],
     ['web', 'android', 'mweb'],
+    None,
 ]
 
 FFMPEG_MISSING_MESSAGE = (
@@ -206,6 +207,13 @@ def download_media(
     """
     options = options or AdvancedOptions()
     os.makedirs(output_dir, exist_ok=True)
+
+    from .validators import is_instagram_collection_url
+    if is_instagram_collection_url(url):
+        return False, (
+            "Instagram profile and reels listing URLs cannot be downloaded directly as a single video. "
+            "Please analyze the URL to discover and select individual Reels, or provide a direct Reel URL."
+        )
 
     if media_type == "Image":
         return download_direct_image(url, output_dir, options, progress_callback, cancel_event)

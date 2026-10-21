@@ -13,7 +13,7 @@ from .media import MediaMetadata, PlaylistItem
 from .errors import InvalidURLError, ExtractorError
 from .system import resolve_js_runtime
 from .cookies import apply_cookie_opts, COOKIES_TXT_HELP
-from .instagram_scraper import InstagramReelsScraper, extract_instagram_reels_from_profile
+from .instagram_scraper import InstagramReelsScraper
 
 
 # Player client fallback chains for YouTube. None = let yt-dlp choose its own
@@ -556,6 +556,8 @@ def extract_media_info(
     playlist_limit: Optional[int] = None,
     shorts_only: bool = False,
     reels_only: bool = False,
+    cookies_browser: Optional[str] = None,
+    cookies_file: Optional[str] = None,
 ) -> MediaMetadata:
     """
     Analyzes a media URL and returns a structured MediaMetadata object.
@@ -588,7 +590,11 @@ def extract_media_info(
         merged = None
         try:
             merged = _extract_instagram_reels(
-                url, playlist_limit, reels_only
+                url=url,
+                playlist_limit=playlist_limit,
+                cookies_browser=cookies_browser,
+                reels_only=reels_only,
+                cookies_file=cookies_file,
             )
         except Exception:
             # yt-dlp's Instagram extractor often fails (auth required, broken extractor).
@@ -600,27 +606,45 @@ def extract_media_info(
             return merged
 
         # Fallback: use InstagramReelsScraper when yt-dlp's extractor returns None
-        # or raises an exception. The scraper uses HTML parsing with cookies
-        # (cookies.txt preferred, browser best-effort) and can succeed even when
-        # yt-dlp's extractor fails (auth issues, broken extractor).
+        # or raises an exception. The scraper supports cookies when provided, and
+        # is more resilient than yt-dlp's own Instagram extractor.
         try:
-            from src.instagram_scraper import InstagramReelsScraper
-            scraper = InstagramReelsScraper()
-            # Use playlist_limit if configured, otherwise discover all accessible Reels
-            # (no arbitrary 50-item cap). When a limit is set, mark results accordingly.
-            max_reels = playlist_limit
-            reel_urls = scraper.extract_reel_urls(url, max_reels=max_reels)
-            if reel_urls:
-                # Build MediaMetadata from the scraper results
-                title = url.split("/")[-2] if "/reels/" in url else "Instagram Profile"
-                thumbnail = None
-                uploader = None
+            try:
+                scraper = InstagramReelsScraper(
+                    cookies_browser=cookies_browser,
+                    cookies_file=cookies_file,
+                )
+            except TypeError:
+                scraper = InstagramReelsScraper()
 
+            max_reels = playlist_limit
+            reel_items = []
+            if hasattr(scraper, "extract_reel_items"):
+                reel_items = scraper.extract_reel_items(url, max_reels=max_reels or 50)
+            elif hasattr(scraper, "extract_reel_urls"):
+                urls = scraper.extract_reel_urls(url, max_reels=max_reels or 50)
+                reel_items = [
+                    {
+                        "url": u,
+                        "thumbnail": None,
+                        "title": f"Reel ({u.strip('/').split('/')[-1]})" if u.strip("/").split("/")[-1] else "Reel",
+                    }
+                    for u in urls
+                ]
+
+            if reel_items:
+                username = ""
+                m = re.search(r"instagram\.com/([^/?#]+)", url)
+                if m:
+                    username = m.group(1).replace("reels", "").strip("/")
+                display_title = f"Instagram Profile (@{username})" if username else "Instagram Profile"
+
+                base_thumb = reel_items[0].get("thumbnail") if reel_items else None
                 base = MediaMetadata(
                     url=url,
-                    title=title,
-                    thumbnail=thumbnail,
-                    uploader=uploader,
+                    title=display_title,
+                    thumbnail=base_thumb,
+                    uploader=username or None,
                     platform="Instagram",
                     is_playlist=True,
                     playlist_title="Instagram Reels",
@@ -629,49 +653,51 @@ def extract_media_info(
                 playlist_items = []
                 seen_urls = set()
                 truncated = False
-                for idx, reel_url in enumerate(reel_urls, 1):
-                    if reel_url in seen_urls:
+                for idx, item in enumerate(reel_items, 1):
+                    reel_url = item.get("url")
+                    if not reel_url or reel_url in seen_urls:
                         continue
                     seen_urls.add(reel_url)
-                    # Check if we've hit a user-configured limit
                     if max_reels is not None and idx > max_reels:
                         truncated = True
                         continue
+                    # Extract reel id or fallback
+                    clean_id = reel_url.strip("/").split("/")[-1]
+                    item_title = item.get("title") or (f"Reel ({clean_id})" if clean_id else f"Reel {idx}")
                     playlist_items.append(PlaylistItem(
                         url=reel_url,
-                        title=reel_url.split("/")[-1] or "Reel " + str(idx),
+                        title=item_title,
                         index=idx,
+                        thumbnail=item.get("thumbnail"),
                         selected=True,
                     ))
 
                 if playlist_items:
                     base.playlist_items = playlist_items
                     base.playlist_count = len(playlist_items)
-                    # Indicate if results were truncated by a user limit
                     if truncated:
-                        base.playlist_title = "Instagram Reels ({} discovered of ~{}+)".format(
-                            len(playlist_items), max_reels
-                        )
+                        base.playlist_title = f"Instagram Reels ({len(playlist_items)} discovered of ~{max_reels}+)"
                     else:
-                        base.playlist_title = "Instagram Reels ({})".format(
-                            len(playlist_items)
-                        )
+                        base.playlist_title = f"Instagram Reels ({len(playlist_items)})"
                     return base
         except Exception:
-            # If scraper fails for any reason (no cookies, extraction error),
-            # fall through to single-item extraction rather than crashing.
             pass
 
         # If we're dealing with an Instagram collection and haven't found any Reels,
         # return empty playlist metadata instead of falling through to generic
         # extraction (which would treat the profile URL as a single video).
         if platform.startswith("Instagram") and is_collection:
-            from .media import MediaMetadata
+            username = ""
+            m = re.search(r"instagram\.com/([^/?#]+)", url)
+            if m:
+                username = m.group(1).replace("reels", "").strip("/")
+            display_title = f"Instagram Profile (@{username})" if username else "Instagram Profile"
+
             return MediaMetadata(
                 url=url,
-                title=url.split("/")[-2] if "/reels/" in url else "Instagram Profile",
+                title=display_title,
                 thumbnail=None,
-                uploader=None,
+                uploader=username or None,
                 platform="Instagram",
                 is_playlist=True,
                 playlist_title="Instagram Reels",
