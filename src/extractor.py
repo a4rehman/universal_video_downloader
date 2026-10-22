@@ -617,12 +617,13 @@ def extract_media_info(
             except TypeError:
                 scraper = InstagramReelsScraper()
 
-            max_reels = playlist_limit
+            # If playlist_limit is None or 0, discover all available reels (up to 2000)
+            max_reels = playlist_limit if (playlist_limit and playlist_limit > 0) else 2000
             reel_items = []
             if hasattr(scraper, "extract_reel_items"):
-                reel_items = scraper.extract_reel_items(url, max_reels=max_reels or 50)
+                reel_items = scraper.extract_reel_items(url, max_reels=max_reels)
             elif hasattr(scraper, "extract_reel_urls"):
-                urls = scraper.extract_reel_urls(url, max_reels=max_reels or 50)
+                urls = scraper.extract_reel_urls(url, max_reels=max_reels)
                 reel_items = [
                     {
                         "url": u,

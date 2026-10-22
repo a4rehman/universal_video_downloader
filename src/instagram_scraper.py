@@ -173,11 +173,19 @@ class InstagramReelsScraper:
                 page.wait_for_timeout(1000)
 
                 # Instagram lazy loads reels on scroll
-                max_scrolls = max(2, min(15, (max_reels // 6) + 1))
+                # If max_reels is set to 0 or large, allow deep scrolling (up to 300 scrolls)
+                if not max_reels or max_reels <= 0:
+                    target_limit = 2000
+                else:
+                    target_limit = max_reels
+
+                # Estimate scrolls needed: Instagram returns ~6-12 reels per batch
+                max_scrolls = max(5, min(300, (target_limit // 4) + 2))
                 seen_hrefs = set()
+                consecutive_no_new = 0
                 for _ in range(max_scrolls):
-                    page.mouse.wheel(0, 1000)
-                    page.wait_for_timeout(1500)
+                    page.mouse.wheel(0, 1500)
+                    page.wait_for_timeout(1200)
 
                     scraped = page.evaluate("""() => {
                         const anchors = Array.from(document.querySelectorAll('a[href*="/reel/"]'));
@@ -209,20 +217,29 @@ class InstagramReelsScraper:
                         });
                     }""")
 
+                    new_found = 0
                     for item in scraped:
                         h = item.get("url")
                         if h and h not in seen_hrefs:
                             seen_hrefs.add(h)
                             items.append(item)
+                            new_found += 1
 
-                    if len(items) >= max_reels:
+                    if new_found == 0:
+                        consecutive_no_new += 1
+                        if consecutive_no_new >= 6:  # Scrolled 6 times without any new reel appearing
+                            break
+                    else:
+                        consecutive_no_new = 0
+
+                    if len(items) >= target_limit:
                         break
 
                 browser.close()
         except Exception as e:
             self.last_error = str(e)
 
-        return items[:max_reels]
+        return items[:target_limit]
 
     # ----- yt-dlp extraction (with optional cookies) -----
     def _extract_with_yt_dlp(self, url: str, max_reels: int) -> List[str]:

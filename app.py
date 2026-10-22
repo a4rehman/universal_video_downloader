@@ -207,6 +207,25 @@ if nav_option == "Home":
                 
                 st.warning(f"📦 {label} detected! Found **{meta.playlist_count}** accessible {item_label}. "
                            "Each will be downloaded as an individual merged file.")
+
+                # Dedicated 1-Click "Download All Reels / Videos" direct action
+                all_count = len(meta.playlist_items)
+                if st.button(f"⚡ Download All {all_count} {item_label} (One-Click)", type="primary", use_container_width=True, key="btn_download_all_reels"):
+                    for item in meta.playlist_items:
+                        item.selected = True
+                    target_dir = ensure_directory_exists(st.session_state.settings.get("download_path", get_default_download_directory()))
+                    jobs = st.session_state.queue_mgr.enqueue_metadata(
+                        meta=meta,
+                        media_type="Video",
+                        quality_key="Best Available",
+                        audio_codec="MP3",
+                        audio_quality="192 kbps",
+                        output_dir=target_dir,
+                        options=AdvancedOptions(),
+                    )
+                    st.success(f"🎉 **{len(jobs)}** {item_label} have been sent directly to the background Downloads Queue!")
+                    st.info("🚀 Downloading in background. Go to **Downloads Queue** in the sidebar to view live progress.")
+
                 p_col1, p_col2 = st.columns(2)
                 with p_col1:
                     if st.button(f"Select All {item_label}", key="p_select_all"):
@@ -217,8 +236,8 @@ if nav_option == "Home":
                         for item in meta.playlist_items:
                             item.selected = False
 
-                with st.expander(f"Inspect {item_label}", expanded=True):
-                    for p_item in meta.playlist_items[:50]:  # Show first 50
+                with st.expander(f"Inspect {item_label}", expanded=False):
+                    for p_item in meta.playlist_items[:100]:  # Show up to 100 in expander
                         if meta.platform.startswith("Instagram") and p_item.thumbnail:
                             t_col1, t_col2 = st.columns([1, 6])
                             with t_col1:
