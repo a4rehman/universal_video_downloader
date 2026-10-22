@@ -140,7 +140,12 @@ class InstagramReelsScraper:
 
     # ----- Playwright headless browser extraction -----
     def _extract_with_playwright(self, url: str, max_reels: int) -> List[Dict[str, Any]]:
-        """Extract reels using Playwright headless browser."""
+        """Extract reels using Playwright headless browser.
+
+        Uses adaptive scrolling with progressive wait times and recovery
+        strategies so that large profiles (1 000+ reels) are fully enumerated
+        instead of stopping after the first visible batch (~12-16 items).
+        """
         try:
             from playwright.sync_api import sync_playwright
         except ImportError:
@@ -156,66 +161,135 @@ class InstagramReelsScraper:
         target_url = f"https://www.instagram.com/{username}/reels/"
         items: List[Dict[str, Any]] = []
 
+        # JS snippet executed after each scroll to collect all reel links
+        # currently in the DOM.  Kept as a constant to avoid re-parsing.
+        _SCRAPE_JS = """() => {
+            const anchors = Array.from(document.querySelectorAll('a[href*="/reel/"]'));
+            return anchors.map(a => {
+                let href = a.href;
+                if (href.includes('?')) href = href.split('?')[0];
+                if (!href.endsWith('/')) href += '/';
+
+                let thumb = null;
+                const img = a.querySelector('img');
+                if (img && img.src) {
+                    thumb = img.src;
+                } else {
+                    const bgDiv = a.querySelector('div[style*="background-image"]');
+                    if (bgDiv) {
+                        const match = bgDiv.style.backgroundImage.match(/url\\(["']?(.*?)["']?\\)/);
+                        if (match) thumb = match[1];
+                    }
+                }
+
+                const parts = href.split('/').filter(Boolean);
+                const shortcode = parts[parts.length - 1];
+
+                return {
+                    url: href,
+                    thumbnail: thumb,
+                    title: 'Reel (' + shortcode + ')'
+                };
+            });
+        }"""
+
+        playwright_cookies = []
+        if self.cookies_file and os.path.exists(self.cookies_file):
+            try:
+                with open(self.cookies_file, "r", encoding="utf-8", errors="ignore") as f:
+                    for line in f:
+                        line = line.strip()
+                        if not line or line.startswith("#"):
+                            continue
+                        parts = line.split("\t")
+                        if len(parts) >= 7 and "instagram.com" in parts[0]:
+                            domain_val = parts[0]
+                            playwright_cookies.append({
+                                "name": parts[5],
+                                "value": parts[6],
+                                "domain": domain_val if domain_val.startswith(".") else f".{domain_val}",
+                                "path": parts[2],
+                            })
+            except Exception:
+                pass
+
         try:
             with sync_playwright() as p:
                 browser = p.chromium.launch(headless=True)
-                page = browser.new_page(
+                context = browser.new_context(
                     viewport={"width": 1280, "height": 900},
                     user_agent=(
                         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
                         "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
                     ),
                 )
+                if playwright_cookies:
+                    try:
+                        context.add_cookies(playwright_cookies)
+                    except Exception:
+                        pass
+
+                page = context.new_page()
                 try:
                     page.goto(target_url, wait_until="networkidle", timeout=30000)
                 except Exception:
                     page.goto(target_url, wait_until="domcontentloaded", timeout=15000)
-                page.wait_for_timeout(1000)
 
-                # Instagram lazy loads reels on scroll
-                # If max_reels is set to 0 or large, allow deep scrolling (up to 300 scrolls)
+                # Give the initial grid time to render
+                page.wait_for_timeout(2000)
+
+                # Instagram lazy-loads reels on scroll.
                 if not max_reels or max_reels <= 0:
                     target_limit = 2000
                 else:
                     target_limit = max_reels
 
-                # Estimate scrolls needed: Instagram returns ~6-12 reels per batch
-                max_scrolls = max(5, min(300, (target_limit // 4) + 2))
-                seen_hrefs = set()
+                # For very large profiles we need more scrolls.
+                # Instagram loads ~6-12 reels per batch, so 1200 reels ≈ 120-200 batches.
+                max_scrolls = max(10, min(1500, (target_limit // 2) + 20))
+
+                seen_hrefs: set = set()
                 consecutive_no_new = 0
-                for _ in range(max_scrolls):
-                    page.mouse.wheel(0, 1500)
-                    page.wait_for_timeout(1200)
 
-                    scraped = page.evaluate("""() => {
-                        const anchors = Array.from(document.querySelectorAll('a[href*="/reel/"]'));
-                        return anchors.map(a => {
-                            let href = a.href;
-                            if (href.includes('?')) href = href.split('?')[0];
-                            if (!href.endsWith('/')) href += '/';
+                # Adaptive parameters that change as we scroll deeper.
+                _BASE_SCROLL_PX = 2500
+                _BASE_WAIT_MS = 1500
+                _STALL_RECOVERY_THRESHOLD = 8
+                _STALL_GIVE_UP_THRESHOLD = 15
 
-                            let thumb = null;
-                            const img = a.querySelector('img');
-                            if (img && img.src) {
-                                thumb = img.src;
-                            } else {
-                                const bgDiv = a.querySelector('div[style*="background-image"]');
-                                if (bgDiv) {
-                                    const match = bgDiv.style.backgroundImage.match(/url\\(["']?(.*?)["']?\\)/);
-                                    if (match) thumb = match[1];
+                for scroll_idx in range(max_scrolls):
+                    # Check for and dismiss Instagram login dialog/modal that blocks scrolling
+                    try:
+                        dialog = page.query_selector('div[role="dialog"]')
+                        if dialog:
+                            close_btn = page.query_selector('svg[aria-label="Close"]')
+                            if close_btn:
+                                try:
+                                    close_btn.click(timeout=1000)
+                                except Exception:
+                                    pass
+                            # Ensure dialog is removed and body overflow is reset to auto
+                            page.evaluate("""() => {
+                                const d = document.querySelector('div[role="dialog"]');
+                                if (d) d.remove();
+                                document.body.style.overflow = 'auto';
+                                if (document.documentElement) {
+                                    document.documentElement.style.overflow = 'auto';
                                 }
-                            }
+                            }""")
+                    except Exception:
+                        pass
 
-                            const parts = href.split('/').filter(Boolean);
-                            const shortcode = parts[parts.length - 1];
+                    # --- Adaptive scroll distance and wait ---
+                    depth_factor = 1.0 + (len(items) / 250.0)
+                    scroll_px = int(_BASE_SCROLL_PX * min(depth_factor, 2.5))
+                    wait_ms = int(_BASE_WAIT_MS * min(depth_factor, 3.0))
 
-                            return {
-                                url: href,
-                                thumbnail: thumb,
-                                title: 'Reel (' + shortcode + ')'
-                            };
-                        });
-                    }""")
+                    page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+                    page.mouse.wheel(0, scroll_px)
+                    page.wait_for_timeout(wait_ms)
+
+                    scraped = page.evaluate(_SCRAPE_JS)
 
                     new_found = 0
                     for item in scraped:
@@ -227,7 +301,30 @@ class InstagramReelsScraper:
 
                     if new_found == 0:
                         consecutive_no_new += 1
-                        if consecutive_no_new >= 6:  # Scrolled 6 times without any new reel appearing
+
+                        # --- Recovery strategies when scrolling stalls ---
+                        if consecutive_no_new == _STALL_RECOVERY_THRESHOLD:
+                            # Strategy 1: scroll to the very bottom of the page
+                            # and wait longer – sometimes Instagram needs a bigger
+                            # jump to trigger the next XHR.
+                            page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+                            page.wait_for_timeout(3000)
+                        elif consecutive_no_new == _STALL_RECOVERY_THRESHOLD + 2:
+                            # Strategy 2: scroll up a bit then back down.
+                            # This can re-trigger IntersectionObserver callbacks
+                            # that Instagram uses for lazy loading.
+                            page.mouse.wheel(0, -3000)
+                            page.wait_for_timeout(1000)
+                            page.mouse.wheel(0, 5000)
+                            page.wait_for_timeout(3000)
+                        elif consecutive_no_new == _STALL_RECOVERY_THRESHOLD + 4:
+                            # Strategy 3: long pause — Instagram may be rate-
+                            # limiting XHR responses for rapid scrollers.
+                            page.wait_for_timeout(5000)
+                            page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+                            page.wait_for_timeout(3000)
+
+                        if consecutive_no_new >= _STALL_GIVE_UP_THRESHOLD:
                             break
                     else:
                         consecutive_no_new = 0

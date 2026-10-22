@@ -237,7 +237,8 @@ if nav_option == "Home":
                             item.selected = False
 
                 with st.expander(f"Inspect {item_label}", expanded=False):
-                    for p_item in meta.playlist_items[:100]:  # Show up to 100 in expander
+                    display_limit = 500
+                    for p_item in meta.playlist_items[:display_limit]:
                         if meta.platform.startswith("Instagram") and p_item.thumbnail:
                             t_col1, t_col2 = st.columns([1, 6])
                             with t_col1:
@@ -257,6 +258,11 @@ if nav_option == "Home":
                                 value=p_item.selected,
                                 key=f"pl_chk_{p_item.index}"
                             )
+                    if len(meta.playlist_items) > display_limit:
+                        st.caption(
+                            f"Showing first {display_limit} of {len(meta.playlist_items)} {item_label}. "
+                            f"Use 'Download All' or 'Select All' to include all items."
+                        )
                 selected_playlist_urls = [p.url for p in meta.playlist_items if p.selected]
                 st.info(f"**{len(selected_playlist_urls)}** {item_label} selected for download.")
             else:
